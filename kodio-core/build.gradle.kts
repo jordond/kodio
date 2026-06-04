@@ -11,7 +11,7 @@ plugins {
     id("kodio-publish-convention")
 }
 
-group = "space.kodio"
+group = "dev.jordond.kodio"
 
 kodioPublishing {
     artifactId = "core"

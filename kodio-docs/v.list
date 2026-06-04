@@ -2,21 +2,21 @@
 <!DOCTYPE vars SYSTEM "https://resources.jetbrains.com/writerside/1.0/vars.dtd">
 <vars>
     <!-- Version numbers -->
-    <var name="kodio-version" value="0.1.5"/>
+    <var name="kodio-version" value="0.1.5-jordond.1"/>
     <var name="kotlin-version" value="2.2.20"/>
     <var name="compose-version" value="1.9.0"/>
     <var name="coroutines-version" value="1.10.2"/>
     
     <!-- Maven coordinates -->
-    <var name="maven-group" value="space.kodio"/>
+    <var name="maven-group" value="dev.jordond.kodio"/>
     <var name="core-artifact" value="core"/>
     <var name="compose-artifact" value="compose"/>
     <var name="compose-material3-artifact" value="compose-material3"/>
     <var name="transcription-artifact" value="transcription"/>
     
     <!-- Links -->
-    <var name="github-repo" value="https://github.com/dosier/kodio"/>
-    <var name="maven-central" value="https://central.sonatype.com/artifact/space.kodio/core"/>
+    <var name="github-repo" value="https://github.com/jordond/kodio"/>
+    <var name="maven-central" value="https://central.sonatype.com/artifact/dev.jordond.kodio/core"/>
     
     <!-- Sample rates for documentation -->
     <var name="voice-sample-rate" value="16000"/>

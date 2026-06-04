@@ -13,7 +13,7 @@ plugins {
     id("kodio-publish-convention")
 }
 
-group = "space.kodio.extensions"
+group = "dev.jordond.kodio.extensions"
 
 kodioPublishing {
     artifactId = "compose"

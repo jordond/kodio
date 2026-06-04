@@ -98,10 +98,10 @@ Kodio uses [Vanniktech Maven Publish Plugin](https://github.com/vanniktech/gradl
 
 | Module | Maven Coordinates |
 |--------|-------------------|
-| Core | `space.kodio:core` |
-| Compose | `space.kodio.extensions:compose` |
-| Compose Material3 | `space.kodio.extensions:compose-material3` |
-| Transcription | `space.kodio.extensions:transcription` |
+| Core | `dev.jordond.kodio:core` |
+| Compose | `dev.jordond.kodio.extensions:compose` |
+| Compose Material3 | `dev.jordond.kodio.extensions:compose-material3` |
+| Transcription | `dev.jordond.kodio.extensions:transcription` |
 
 ### Version Management
 
@@ -197,7 +197,7 @@ repositories {
     mavenLocal()
 }
 dependencies {
-    implementation("space.kodio:core:0.1.0-SNAPSHOT")
+    implementation("dev.jordond.kodio:core:0.1.5-jordond.1")
 }
 ```
 
@@ -330,4 +330,3 @@ chore: update dependencies
 - Open an [issue](https://github.com/dosier/kodio/issues) for bugs or feature requests
 
 Thank you for contributing! 🎉
-

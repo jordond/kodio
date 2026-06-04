@@ -1,6 +1,6 @@
-# 0.1.5 Pre-release manual test checklist
+# 0.1.5-jordond.1 Pre-release manual test checklist
 
-Run through these before tagging `v0.1.5`. This release ships the Android
+Run through these before tagging `v0.1.5-jordond.1`. This release ships the Android
 compatibility fix from [PR #23](https://github.com/dosier/kodio/pull/23), which
 keeps the Compose waveform code off `List.removeLast()` for Android API levels
 below 35.
@@ -21,17 +21,17 @@ below 35.
 
 ## Versioning / artifact
 
-- [ ] Bump `kodio.version` in `gradle.properties` to `0.1.5`.
-- [ ] Update README and Writerside dependency examples to `0.1.5`.
+- [ ] Bump `kodio.version` in `gradle.properties` to `0.1.5-jordond.1`.
+- [ ] Update README and Writerside dependency examples to `0.1.5-jordond.1`.
 - [ ] Commit the version bump and documentation updates.
 - [ ] `git push origin master`.
-- [ ] `git tag v0.1.5 && git push origin v0.1.5` — `publish.yml` runs CI,
+- [ ] `git tag v0.1.5-jordond.1 && git push origin v0.1.5-jordond.1` — `publish.yml` runs CI,
       then publishes to Maven Central.
 - [ ] Once `publish` is green, verify the artifacts appear on Maven Central:
-      `space.kodio:core:0.1.5`,
-      `space.kodio.extensions:compose:0.1.5`,
-      `space.kodio.extensions:compose-material3:0.1.5`,
-      `space.kodio.extensions:transcription:0.1.5`,
-      `space.kodio.extensions:ktor:0.1.5`.
-- [ ] Confirm the GitHub Release for `v0.1.5` mentions PR #23 and the Android
+      `dev.jordond.kodio:core:0.1.5-jordond.1`,
+      `dev.jordond.kodio.extensions:compose:0.1.5-jordond.1`,
+      `dev.jordond.kodio.extensions:compose-material3:0.1.5-jordond.1`,
+      `dev.jordond.kodio.extensions:transcription:0.1.5-jordond.1`,
+      `dev.jordond.kodio.extensions:ktor:0.1.5-jordond.1`.
+- [ ] Confirm the GitHub Release for `v0.1.5-jordond.1` mentions PR #23 and the Android
       API < 35 Compose waveform compatibility fix.

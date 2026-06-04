@@ -24,7 +24,7 @@ First, add to your `libs.versions.toml`:
 kodio = "%kodio-version%"
 
 [libraries]
-kodio-core = { module = "space.kodio:core", version.ref = "kodio" }
+kodio-core = { module = "dev.jordond.kodio:core", version.ref = "kodio" }
 ```
 
 Then in your `build.gradle.kts`:
@@ -46,7 +46,7 @@ kotlin {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("space.kodio:core:%kodio-version%")
+            implementation("dev.jordond.kodio:core:%kodio-version%")
         }
     }
 }
@@ -94,16 +94,16 @@ Kodio supports all major Kotlin Multiplatform targets:
 Kodio is split into modules so you can include only what you need:
 
 <deflist type="medium">
-<def title="space.kodio:core">
+<def title="dev.jordond.kodio:core">
 The foundation module providing recording, playback, and file I/O. This is the only required module.
 </def>
-<def title="space.kodio.extensions:compose">
+<def title="dev.jordond.kodio.extensions:compose">
 Compose Multiplatform state holders (<code>rememberRecorderState</code>, <code>rememberPlayerState</code>) and the <code>AudioWaveform</code> component.
 </def>
-<def title="space.kodio.extensions:compose-material3">
+<def title="dev.jordond.kodio.extensions:compose-material3">
 Pre-built Material 3 UI components like <code>RecordAudioButton</code>, <code>PlayAudioButton</code>, and <code>ErrorDialog</code>.
 </def>
-<def title="space.kodio.extensions:transcription">
+<def title="dev.jordond.kodio.extensions:transcription">
 Audio transcription using OpenAI Whisper API. Provides <code>OpenAIWhisperEngine</code> and the <code>AudioFlow.transcribe()</code> extension.
 </def>
 </deflist>

@@ -32,10 +32,10 @@ Add the version and library to your `gradle/libs.versions.toml`:
 kodio = "%kodio-version%"
 
 [libraries]
-kodio-core = { module = "space.kodio:core", version.ref = "kodio" }
-kodio-compose = { module = "space.kodio.extensions:compose", version.ref = "kodio" }
-kodio-compose-material3 = { module = "space.kodio.extensions:compose-material3", version.ref = "kodio" }
-kodio-transcription = { module = "space.kodio.extensions:transcription", version.ref = "kodio" }
+kodio-core = { module = "dev.jordond.kodio:core", version.ref = "kodio" }
+kodio-compose = { module = "dev.jordond.kodio.extensions:compose", version.ref = "kodio" }
+kodio-compose-material3 = { module = "dev.jordond.kodio.extensions:compose-material3", version.ref = "kodio" }
+kodio-transcription = { module = "dev.jordond.kodio.extensions:transcription", version.ref = "kodio" }
 ```
 
 </step>
@@ -65,7 +65,7 @@ Add directly to your `build.gradle.kts`:
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("space.kodio:core:%kodio-version%")
+            implementation("dev.jordond.kodio:core:%kodio-version%")
         }
     }
 }
@@ -103,16 +103,16 @@ commonMain.dependencies {
 ```kotlin
 commonMain.dependencies {
     // Core (required)
-    implementation("space.kodio:core:%kodio-version%")
+    implementation("dev.jordond.kodio:core:%kodio-version%")
     
     // Compose state holders + AudioWaveform
-    implementation("space.kodio.extensions:compose:%kodio-version%")
+    implementation("dev.jordond.kodio.extensions:compose:%kodio-version%")
     
     // Material 3 UI components
-    implementation("space.kodio.extensions:compose-material3:%kodio-version%")
+    implementation("dev.jordond.kodio.extensions:compose-material3:%kodio-version%")
     
     // Audio transcription (OpenAI Whisper)
-    implementation("space.kodio.extensions:transcription:%kodio-version%")
+    implementation("dev.jordond.kodio.extensions:transcription:%kodio-version%")
 }
 ```
 

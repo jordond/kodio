@@ -21,10 +21,10 @@ flowchart LR
 
 | Module | Maven Coordinates | Description |
 |--------|-------------------|-------------|
-| Core | `space.kodio:core` | Audio recording, playback, formats |
-| Compose | `space.kodio.extensions:compose` | Compose UI components |
-| Compose Material3 | `space.kodio.extensions:compose-material3` | Material 3 themed components |
-| Transcription | `space.kodio.extensions:transcription` | OpenAI Whisper transcription |
+| Core | `dev.jordond.kodio:core` | Audio recording, playback, formats |
+| Compose | `dev.jordond.kodio.extensions:compose` | Compose UI components |
+| Compose Material3 | `dev.jordond.kodio.extensions:compose-material3` | Material 3 themed components |
+| Transcription | `dev.jordond.kodio.extensions:transcription` | OpenAI Whisper transcription |
 
 All modules are published as Kotlin Multiplatform artifacts with Android release variants.
 
@@ -142,8 +142,8 @@ Confirm:
 
 Artifacts appear on Maven Central after Sonatype processing (can take 15-30 minutes):
 
-- [search.maven.org — space.kodio:core](https://search.maven.org/search?q=g:space.kodio)
-- [central.sonatype.com](https://central.sonatype.com/artifact/space.kodio/core)
+- [search.maven.org — dev.jordond.kodio:core](https://search.maven.org/search?q=g:dev.jordond.kodio)
+- [central.sonatype.com](https://central.sonatype.com/artifact/dev.jordond.kodio/core)
 
 ### 9. Post-release (optional)
 

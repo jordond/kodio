@@ -1,4 +1,4 @@
-[![Maven Central](https://img.shields.io/maven-central/v/space.kodio/core?style=flat&logo=apachemaven&logoColor=white&label=Maven%20Central)](https://central.sonatype.com/artifact/space.kodio/core)
+[![Maven Central](https://img.shields.io/maven-central/v/dev.jordond.kodio/core?style=flat&logo=apachemaven&logoColor=white&label=Maven%20Central)](https://central.sonatype.com/artifact/dev.jordond.kodio/core)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.20-7F52FF?style=flat&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat)](LICENSE)
 [![Docs](https://img.shields.io/badge/Docs-GitHub%20Pages-4285F4?style=flat&logo=gitbook&logoColor=white)](https://dosier.github.io/kodio/)
@@ -51,16 +51,16 @@ suspend fun main() {
 ```kotlin
 dependencies {
     // Core library (required)
-    implementation("space.kodio:core:0.1.5")
+    implementation("dev.jordond.kodio:core:0.1.5-jordond.1")
     
     // Optional: Compose state holders and waveform
-    implementation("space.kodio.extensions:compose:0.1.5")
+    implementation("dev.jordond.kodio.extensions:compose:0.1.5-jordond.1")
     
     // Optional: Material 3 UI components
-    implementation("space.kodio.extensions:compose-material3:0.1.5")
+    implementation("dev.jordond.kodio.extensions:compose-material3:0.1.5-jordond.1")
     
     // Optional: Audio transcription (OpenAI Whisper)
-    implementation("space.kodio.extensions:transcription:0.1.5")
+    implementation("dev.jordond.kodio.extensions:transcription:0.1.5-jordond.1")
 }
 ```
 
