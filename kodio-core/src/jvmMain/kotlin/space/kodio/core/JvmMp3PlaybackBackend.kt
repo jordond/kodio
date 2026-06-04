@@ -12,6 +12,8 @@ import java.io.ByteArrayInputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sound.sampled.DataLine
 import javax.sound.sampled.SourceDataLine
+import kotlin.math.roundToLong
+import kotlin.time.Duration.Companion.milliseconds
 import javax.sound.sampled.AudioFormat as JavaSoundAudioFormat
 import javax.sound.sampled.AudioSystem as JavaSoundAudioSystem
 
@@ -30,8 +32,10 @@ internal class JvmMp3PlaybackBackend(
                 "Direct playback is only implemented for MP3 on JVM targets."
             )
         }
+        val bytes = encodedAudio.toByteArray()
+        val duration = calculateDurationMillis(bytes).roundToLong().milliseconds
         this.encodedAudio = encodedAudio
-        return null
+        return duration
     }
 
     suspend fun playBlocking(startPosition: kotlin.time.Duration) {
@@ -118,6 +122,24 @@ internal class JvmMp3PlaybackBackend(
         line?.close()
         line = null
     }
+}
+
+private fun calculateDurationMillis(bytes: ByteArray): Double {
+    var totalMillis = 0.0
+    val bitstream = Bitstream(ByteArrayInputStream(bytes))
+    try {
+        while (true) {
+            val header = bitstream.readFrame() ?: break
+            try {
+                totalMillis += header.ms_per_frame().toDouble()
+            } finally {
+                bitstream.closeFrame()
+            }
+        }
+    } finally {
+        bitstream.close()
+    }
+    return totalMillis
 }
 
 private fun SampleBuffer.toLittleEndianPcm16Bytes(): ByteArray {

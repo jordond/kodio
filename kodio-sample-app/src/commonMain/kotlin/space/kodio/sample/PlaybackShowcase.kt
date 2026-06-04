@@ -37,6 +37,8 @@ import space.kodio.core.io.files.AudioFileFormat
 import space.kodio.core.io.files.AudioFileReadError
 import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.io.files.fromBytes
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun PlaybackShowcase() {
@@ -407,13 +409,28 @@ private fun EncodedPlaybackCard(encodedAudio: EncodedAudio, device: AudioDevice.
     val scope = rememberCoroutineScope()
     var player by remember { mutableStateOf<space.kodio.core.Player?>(null) }
     var playbackState by remember { mutableStateOf<AudioPlaybackSession.State>(AudioPlaybackSession.State.Idle) }
+    var position by remember { mutableStateOf(Duration.ZERO) }
+    var duration by remember { mutableStateOf<Duration?>(null) }
+    var canSeek by remember { mutableStateOf(false) }
 
     LaunchedEffect(encodedAudio, device) {
         val p = Kodio.player(device)
         player = p
-        p.load(encodedAudio)
         try {
-            p.stateFlow.collect { playbackState = it }
+            p.load(encodedAudio)
+            position = p.position
+            duration = p.duration
+            canSeek = p.canSeek
+
+            val positionJob = launch {
+                p.positionFlow.collect { position = it }
+            }
+
+            try {
+                p.stateFlow.collect { playbackState = it }
+            } finally {
+                positionJob.cancel()
+            }
         } finally {
             p.release()
             player = null
@@ -479,6 +496,15 @@ private fun EncodedPlaybackCard(encodedAudio: EncodedAudio, device: AudioDevice.
                         MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            PlaybackSeekControls(
+                position = position,
+                duration = duration,
+                canSeek = canSeek,
+                onSeek = { target ->
+                    scope.launch { player?.seekTo(target) }
+                }
+            )
 
             (playbackState as? AudioPlaybackSession.State.Error)?.let { err ->
                 Text(
@@ -555,6 +581,13 @@ private fun PlaybackCard(recording: AudioRecording, device: AudioDevice.Output? 
                 )
             }
 
+            PlaybackSeekControls(
+                position = playerState.position,
+                duration = playerState.duration,
+                canSeek = playerState.canSeek,
+                onSeek = playerState::seekTo
+            )
+
             playerState.error?.let { err ->
                 Text(
                     text = err.message ?: "Playback error",
@@ -562,6 +595,65 @@ private fun PlaybackCard(recording: AudioRecording, device: AudioDevice.Output? 
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackSeekControls(
+    position: Duration,
+    duration: Duration?,
+    canSeek: Boolean,
+    onSeek: (Duration) -> Unit,
+) {
+    val durationMs = duration?.inWholeMilliseconds?.coerceAtLeast(0L)
+    val clampedPositionMs = if (durationMs != null) {
+        position.inWholeMilliseconds.coerceIn(0L, durationMs)
+    } else {
+        position.inWholeMilliseconds.coerceAtLeast(0L)
+    }
+    var dragValueMs by remember { mutableStateOf<Long?>(null) }
+    val displayedPositionMs = dragValueMs ?: clampedPositionMs
+    val sliderMax = (durationMs ?: 0L).coerceAtLeast(1L).toFloat()
+    val seekEnabled = canSeek && durationMs != null && durationMs > 0L
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Slider(
+            value = displayedPositionMs.coerceAtMost(sliderMax.toLong()).toFloat(),
+            onValueChange = { value ->
+                dragValueMs = value.toLong().coerceIn(0L, durationMs ?: 0L)
+            },
+            onValueChangeFinished = {
+                val targetMs = dragValueMs
+                dragValueMs = null
+                if (targetMs != null) onSeek(targetMs.milliseconds)
+            },
+            valueRange = 0f..sliderMax,
+            enabled = seekEnabled,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = formatPlaybackTime(displayedPositionMs.milliseconds),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Text(
+                text = duration?.let(::formatPlaybackTime) ?: "Duration unavailable",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -618,6 +710,13 @@ private fun formatDuration(duration: kotlin.time.Duration): String {
     val seconds = totalMs / 1000
     val ms = totalMs % 1000
     return if (seconds > 0) "${seconds}.${(ms / 100)}s" else "${ms}ms"
+}
+
+private fun formatPlaybackTime(duration: Duration): String {
+    val totalSeconds = duration.inWholeSeconds.coerceAtLeast(0)
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "$minutes:${seconds.toString().padStart(2, '0')}"
 }
 
 private fun formatFileSize(bytes: Long): String = when {
