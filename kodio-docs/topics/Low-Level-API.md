@@ -38,11 +38,15 @@ val session = SystemAudioSystem.createRecordingSession(
 ```kotlin
 val session = SystemAudioSystem.createPlaybackSession()
 
-session.load(audioFlow)
+session.load(recording)
+session.seekTo(2.seconds)
 session.play()
 session.state.first { it is AudioPlaybackSession.State.Finished }
 session.stop()
 ```
+
+Seeking is only available when the session is loaded with an `AudioRecording`.
+Streaming `AudioFlow` sources loaded with `session.load(audioFlow)` cannot seek.
 
 ## Live processing {id="live-processing"}
 

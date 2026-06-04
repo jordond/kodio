@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import space.kodio.core.*
+import kotlin.time.Duration
 
 /**
  * State holder for audio playback in Compose.
@@ -63,7 +64,11 @@ class PlayerState internal constructor(
     private var _isFinished = mutableStateOf(false)
     private var _error = mutableStateOf<AudioError?>(null)
     private var _loadedRecording = mutableStateOf<AudioRecording?>(null)
+    private var _position = mutableStateOf(Duration.ZERO)
+    private var _duration = mutableStateOf<Duration?>(null)
+    private var _canSeek = mutableStateOf(false)
     private var stateObserverJob: Job? = null
+    private var positionObserverJob: Job? = null
     
     // Mutex for thread-safe state transitions
     private val stateMutex = Mutex()
@@ -97,6 +102,21 @@ class PlayerState internal constructor(
      * The most recent error, if any.
      */
     val error: AudioError? by _error
+
+    /**
+     * Current playback position.
+     */
+    val position: Duration by _position
+
+    /**
+     * Total loaded recording duration, if known.
+     */
+    val duration: Duration? by _duration
+
+    /**
+     * Whether the loaded audio supports seeking.
+     */
+    val canSeek: Boolean by _canSeek
 
     /**
      * Whether there is an error.
@@ -144,6 +164,9 @@ class PlayerState internal constructor(
             
             stateMutex.withLock {
                 _loadedRecording.value = recording
+                _position.value = player.position
+                _duration.value = player.duration
+                _canSeek.value = player.canSeek
                 _isReady.value = true
                 _isPlaying.value = false
                 _isPaused.value = false
@@ -151,6 +174,7 @@ class PlayerState internal constructor(
             }
             
             observePlayerState(player)
+            observePlayerPosition(player)
         } catch (e: Exception) {
             stateMutex.withLock {
                 _error.value = AudioError.from(e)
@@ -198,9 +222,34 @@ class PlayerState internal constructor(
      */
     fun stop() {
         _player?.stop()
+        _position.value = Duration.ZERO
         _isPlaying.value = false
         _isPaused.value = false
         _isFinished.value = false
+    }
+
+    /**
+     * Seeks playback to [position].
+     */
+    fun seekTo(position: Duration) {
+        scope.launch {
+            seekToAsync(position)
+        }
+    }
+
+    /**
+     * Seeks playback to [position] (suspend version).
+     */
+    suspend fun seekToAsync(position: Duration) {
+        val player = _player ?: return
+
+        try {
+            player.seekTo(position)
+            _position.value = player.position
+            _isFinished.value = player.isFinished
+        } catch (e: Exception) {
+            _error.value = AudioError.from(e)
+        }
     }
 
     /**
@@ -259,9 +308,14 @@ class PlayerState internal constructor(
         stateMutex.withLock {
             stateObserverJob?.cancel()
             stateObserverJob = null
+            positionObserverJob?.cancel()
+            positionObserverJob = null
             _player?.release()
             _player = null
             _loadedRecording.value = null
+            _position.value = Duration.ZERO
+            _duration.value = null
+            _canSeek.value = false
             _isReady.value = false
             _isPlaying.value = false
             _isPaused.value = false
@@ -277,6 +331,8 @@ class PlayerState internal constructor(
     internal fun release() {
         stateObserverJob?.cancel()
         stateObserverJob = null
+        positionObserverJob?.cancel()
+        positionObserverJob = null
         _player?.release()
         _player = null
     }
@@ -324,6 +380,15 @@ class PlayerState internal constructor(
                         _isFinished.value = false
                     }
                 }
+            }
+        }
+    }
+
+    private fun observePlayerPosition(player: Player) {
+        positionObserverJob?.cancel()
+        positionObserverJob = scope.launch {
+            player.positionFlow.collectLatest { position ->
+                _position.value = position
             }
         }
     }

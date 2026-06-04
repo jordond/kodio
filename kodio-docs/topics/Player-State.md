@@ -160,6 +160,14 @@ fun CompletePlayer(recording: AudioRecording) {
             ) {
                 Text("⏹")
             }
+
+            // Seek to midpoint
+            Button(
+                onClick = { playerState.duration?.let { playerState.seekTo(it / 2) } },
+                enabled = playerState.canSeek
+            ) {
+                Text("½")
+            }
         }
 
         // Error display
@@ -183,6 +191,9 @@ fun CompletePlayer(recording: AudioRecording) {
 <def title="isPaused: Boolean">Playback is paused (can resume).</def>
 <def title="isReady: Boolean">Audio is loaded and ready to play.</def>
 <def title="isFinished: Boolean">Playback has completed.</def>
+<def title="canSeek: Boolean">The loaded recording supports seeking.</def>
+<def title="position: Duration">Current playback position.</def>
+<def title="duration: Duration?">Loaded recording duration, if known.</def>
 <def title="recording: AudioRecording?">The currently loaded recording.</def>
 <def title="error: AudioError?">Current error, if any.</def>
 </deflist>
@@ -193,6 +204,7 @@ fun CompletePlayer(recording: AudioRecording) {
 <def title="load(recording)">Load an <code>AudioRecording</code> for playback.</def>
 <def title="play()">Start or resume playback.</def>
 <def title="pause()">Pause playback.</def>
+<def title="seekTo(position)">Jump to a playback position.</def>
 <def title="stop()">Stop playback and reset to beginning.</def>
 <def title="toggle()">Play if stopped/paused, pause if playing.</def>
 <def title="clearError()">Clear the current error state.</def>

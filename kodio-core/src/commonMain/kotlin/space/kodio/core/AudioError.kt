@@ -1,5 +1,7 @@
 package space.kodio.core
 
+import kotlin.time.Duration
+
 /**
  * Sealed hierarchy representing all possible audio-related errors.
  * 
@@ -68,6 +70,21 @@ sealed class AudioError(
         override fun equals(other: Any?) = other is AlreadyPlaying
         override fun hashCode() = "AlreadyPlaying".hashCode()
     }
+
+    /**
+     * The loaded playback source cannot seek.
+     */
+    class SeekUnsupported : AudioError("Seeking is only supported for loaded AudioRecording instances") {
+        override fun equals(other: Any?) = other is SeekUnsupported
+        override fun hashCode() = "SeekUnsupported".hashCode()
+    }
+
+    /**
+     * The requested seek position is invalid.
+     */
+    data class InvalidSeekPosition(
+        val position: Duration
+    ) : AudioError("Invalid seek position: $position")
 
     /**
      * No recording data available.

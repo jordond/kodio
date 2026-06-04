@@ -11,6 +11,7 @@ import space.kodio.core.io.files.AudioFileFormat
 import space.kodio.core.io.files.writeToFile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Represents a recorded audio clip with its format metadata.
@@ -111,6 +112,42 @@ class AudioRecording private constructor(
     fun asAudioFlow(): AudioFlow = AudioFlow(format, asFlow(defensiveCopy = true))
 
     /**
+     * Returns this recording as an [AudioFlow] starting at [position].
+     *
+     * The start point is aligned to the nearest audio frame at or before the
+     * requested position. Positions past the end produce an empty flow.
+     *
+     * @throws AudioError.InvalidSeekPosition if [position] is negative.
+     */
+    internal fun asAudioFlowFrom(position: Duration): AudioFlow {
+        val startByteOffset = byteOffsetAt(position)
+        return AudioFlow(
+            format = format,
+            data = flow {
+                var bytesToSkip = startByteOffset
+                for (chunk in chunks) {
+                    if (bytesToSkip >= chunk.size) {
+                        bytesToSkip -= chunk.size
+                        continue
+                    }
+
+                    val offset = bytesToSkip.toInt()
+                    emit(
+                        if (offset == 0) chunk.copyOf()
+                        else chunk.copyOfRange(offset, chunk.size)
+                    )
+                    bytesToSkip = 0L
+                }
+            }
+        )
+    }
+
+    internal fun normalizedSeekPosition(position: Duration): Duration {
+        if (position < Duration.ZERO) throw AudioError.InvalidSeekPosition(position)
+        return if (position > calculatedDuration) calculatedDuration else position
+    }
+
+    /**
      * Collects all chunks into a single byte array.
      * Note: This loads all audio data into memory.
      * Returns a new array (not a reference to internal data).
@@ -122,6 +159,21 @@ class AudioRecording private constructor(
         val buffer = Buffer()
         chunks.forEach { buffer.write(it) }
         return buffer.readByteArray()
+    }
+
+    private fun byteOffsetAt(position: Duration): Long {
+        val frameSize = format.bytesPerFrame
+        if (frameSize <= 0 || format.sampleRate <= 0) return 0L
+        val frameOffset = frameOffsetAt(normalizedSeekPosition(position))
+        return (frameOffset * frameSize).coerceAtMost(sizeInBytes)
+    }
+
+    private fun frameOffsetAt(position: Duration): Long {
+        val wholeSeconds = position.inWholeSeconds
+        val remainder = position - wholeSeconds.seconds
+        val wholeSecondFrames = wholeSeconds * format.sampleRate
+        val remainderFrames = (remainder.inWholeNanoseconds * format.sampleRate) / 1_000_000_000L
+        return (wholeSecondFrames + remainderFrames).coerceAtMost(frameCount)
     }
 
     /**
