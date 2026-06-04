@@ -77,6 +77,9 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     }
 
     final override suspend fun play() {
+        if (_state.value is State.Finished && loadedRecording != null) {
+            _position.value = Duration.ZERO
+        }
         val audioFlow = playableAudioFlow()
         if (audioFlow == null) {
             log.warn { "play() called but audioFlow is null, returning" }

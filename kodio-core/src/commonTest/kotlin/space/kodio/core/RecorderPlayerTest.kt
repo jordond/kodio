@@ -473,6 +473,29 @@ class RecorderPlayerTest {
     }
 
     @Test
+    fun `Base playback restarts loaded recording from finished state`() = runTest {
+        val session = CollectingPlaybackSession()
+        val recording = AudioRecording.fromBytes(
+            seekTestFormat,
+            byteArrayOf(0, 1, 2, 3, 4)
+        )
+
+        session.load(recording)
+        session.play()
+        session.state.first { it is AudioPlaybackSession.State.Finished }
+
+        session.play()
+        session.state.first { it is AudioPlaybackSession.State.Finished }
+
+        assertEquals(2, session.seekPositions.size)
+        assertTrue(session.seekPositions.all { it < 1.milliseconds })
+        assertEquals(2, session.playedChunks.size)
+        session.playedChunks.forEach {
+            assertContentEquals(byteArrayOf(0, 1, 2, 3, 4), it)
+        }
+    }
+
+    @Test
     fun `Base seek clamps positions past recording duration`() = runTest {
         val session = CollectingPlaybackSession()
         val recording = AudioRecording.fromBytes(
