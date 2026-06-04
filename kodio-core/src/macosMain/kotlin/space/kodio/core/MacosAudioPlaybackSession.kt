@@ -1,9 +1,23 @@
 package space.kodio.core
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
+import kotlinx.io.Buffer
+import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.io.write
 import space.kodio.core.MacosAudioQueueProperty.CurrentDevice
+import platform.AVFAudio.AVAudioPlayer
+import platform.Foundation.NSURL
+import space.kodio.core.io.files.AudioFileFormat
+import space.kodio.core.io.files.AudioFileReadError
+import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.util.namedLogger
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = namedLogger("PlaybackSession")
 
@@ -20,6 +34,8 @@ class MacosAudioPlaybackSession(
     private lateinit var audioQueue: MacosAudioQueue.Writable
     private var paused = false
     private var outputFormat: AudioFormat? = null
+    private var encodedPlayer: AVAudioPlayer? = null
+    private var encodedTempPath: Path? = null
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         logger.debug { "preparePlayback called with format: $format" }
@@ -121,19 +137,90 @@ class MacosAudioPlaybackSession(
         logger.debug { "streamFrom completed" }
     }
 
+    @OptIn(ExperimentalForeignApi::class)
+    override suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? {
+        if (encodedAudio.fileFormat !is AudioFileFormat.Mp3) {
+            throw AudioFileReadError.UnsupportedFormat(
+                "Direct playback is only implemented for MP3 on macOS."
+            )
+        }
+        val bytes = encodedAudio.toByteArray()
+        val path = writeEncodedTempFile(bytes, encodedAudio.fileFormat.extension)
+        val url = NSURL.fileURLWithPath(path.toString())
+        val player = runErrorCatching { errorVar ->
+            AVAudioPlayer(contentsOfURL = url, error = errorVar)
+        }.getOrElse {
+            throw AudioFileReadError.InvalidFile("Unable to load MP3 data: ${it.message}", it)
+        }
+        if (!player.prepareToPlay()) {
+            runCatching { SystemFileSystem.delete(path, mustExist = false) }
+            throw AudioFileReadError.InvalidFile("Unable to prepare MP3 data for playback.")
+        }
+        releaseLoadedEncodedAudio()
+        encodedPlayer = player
+        encodedTempPath = path
+        return player.duration.seconds
+    }
+
+    override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
+        val player = encodedPlayer ?: return
+        player.currentTime = startPosition.inWholeMilliseconds / 1000.0
+        if (!player.play()) {
+            throw AudioFileReadError.InvalidFile("Unable to start MP3 playback.")
+        }
+        while (player.isPlaying() || state.value is AudioPlaybackSession.State.Paused) {
+            delay(50.milliseconds)
+        }
+    }
+
+    override fun seekLoadedEncodedAudio(position: Duration) {
+        encodedPlayer?.currentTime = position.inWholeMilliseconds / 1000.0
+    }
+
     override fun onPause() {
+        encodedPlayer?.pause()
         if (paused) return
+        if (!::audioQueue.isInitialized) return
         audioQueue.pause()
         paused = true
     }
 
     override fun onResume() {
+        encodedPlayer?.play()
         if (!paused) return
+        if (!::audioQueue.isInitialized) return
         audioQueue.start()
         paused = false
     }
 
     override fun onStop() {
-        audioQueue.stop(inImmediate = true)
+        encodedPlayer?.let {
+            it.stop()
+            it.currentTime = 0.0
+        }
+        if (::audioQueue.isInitialized) {
+            audioQueue.stop(inImmediate = true)
+        }
+    }
+
+    override fun releaseLoadedEncodedAudio() {
+        encodedPlayer?.stop()
+        encodedPlayer = null
+        encodedTempPath?.let {
+            runCatching { SystemFileSystem.delete(it, mustExist = false) }
+        }
+        encodedTempPath = null
+    }
+
+    private fun writeEncodedTempFile(bytes: ByteArray, extension: String): Path {
+        val path = Path(
+            SystemTemporaryDirectory,
+            "kodio-${kotlin.random.Random.nextLong().toString(16)}.$extension"
+        )
+        SystemFileSystem.sink(path).use { sink ->
+            val buffer = Buffer().apply { write(bytes) }
+            sink.write(buffer, buffer.size)
+        }
+        return path
     }
 }

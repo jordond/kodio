@@ -70,6 +70,11 @@ kotlin {
                 implementation(libs.kotlinx.coroutines.test)
             }
         }
+        jvmMain {
+            dependencies {
+                implementation(libs.jlayer)
+            }
+        }
         jvmTest {
             dependencies {
                 implementation(libs.slf4j.simple)
@@ -162,4 +167,3 @@ tasks.named<Copy>("jvmProcessResources") {
         }
     }
 }
-

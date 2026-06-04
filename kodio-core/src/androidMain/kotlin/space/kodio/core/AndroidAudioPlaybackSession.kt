@@ -4,8 +4,16 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaDataSource
+import android.media.MediaPlayer
 import android.media.AudioRecord
 import android.media.AudioTrack
+import kotlinx.coroutines.CompletableDeferred
+import space.kodio.core.io.files.AudioFileFormat
+import space.kodio.core.io.files.AudioFileReadError
+import space.kodio.core.io.files.EncodedAudio
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import android.media.AudioFormat as AndroidAudioFormat
 
 internal class AndroidAudioPlaybackSession(
@@ -17,6 +25,7 @@ internal class AndroidAudioPlaybackSession(
     private lateinit var preparedFormat: AudioFormat
     private var androidEncoding: Int = AndroidAudioFormat.ENCODING_INVALID
     private var androidChannelMask: Int = 0
+    private var mediaPlayer: MediaPlayer? = null
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         ensureInterleaved(format) // AudioTrack expects interleaved frames
@@ -92,18 +101,67 @@ internal class AndroidAudioPlaybackSession(
         }
     }
 
+    override suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? {
+        if (encodedAudio.fileFormat !is AudioFileFormat.Mp3) {
+            throw AudioFileReadError.UnsupportedFormat(
+                "Direct playback is only implemented for MP3 on Android."
+            )
+        }
+        val bytes = encodedAudio.toByteArray()
+        val player = MediaPlayer().apply {
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .build()
+            )
+            setDataSource(ByteArrayMediaDataSource(bytes))
+            prepare()
+        }
+        if (requestedDevice != null) setPreferredDevice(context, requestedDevice, player)
+        releaseLoadedEncodedAudio()
+        mediaPlayer = player
+        return player.duration.milliseconds
+    }
+
+    override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
+        val player = mediaPlayer ?: return
+        val finished = CompletableDeferred<Unit>()
+        player.setOnCompletionListener { finished.complete(Unit) }
+        player.setOnErrorListener { _, what, extra ->
+            finished.completeExceptionally(RuntimeException("Android MediaPlayer error what=$what extra=$extra"))
+            true
+        }
+        player.seekTo(startPosition.inWholeMilliseconds.toInt())
+        player.start()
+        finished.await()
+    }
+
     override fun onPause() {
+        mediaPlayer?.pause()
         audioTrack?.pause()
     }
 
     override fun onResume() {
+        mediaPlayer?.start()
         audioTrack?.play()
     }
 
     override fun onStop() {
+        mediaPlayer?.let { player ->
+            runCatching {
+                if (player.isPlaying) player.pause()
+                player.seekTo(0)
+            }
+        }
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null
+    }
+
+    override fun releaseLoadedEncodedAudio() {
+        mediaPlayer?.release()
+        mediaPlayer = null
     }
 }
 
@@ -123,6 +181,26 @@ private fun setPreferredDevice(context: Context, requestedDevice: AudioDevice.Ou
     val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
     val selectedDevice = devices.firstOrNull { it.id.toString() == requestedDevice.id }
     if (selectedDevice != null) audioTrack.preferredDevice = selectedDevice
+}
+
+private fun setPreferredDevice(context: Context, requestedDevice: AudioDevice.Output, mediaPlayer: MediaPlayer) {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+    val selectedDevice = devices.firstOrNull { it.id.toString() == requestedDevice.id }
+    if (selectedDevice != null) mediaPlayer.preferredDevice = selectedDevice
+}
+
+private class ByteArrayMediaDataSource(private val bytes: ByteArray) : MediaDataSource() {
+    override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+        if (position >= bytes.size) return -1
+        val length = minOf(size, bytes.size - position.toInt())
+        bytes.copyInto(buffer, destinationOffset = offset, startIndex = position.toInt(), endIndex = position.toInt() + length)
+        return length
+    }
+
+    override fun getSize(): Long = bytes.size.toLong()
+
+    override fun close() = Unit
 }
 
 /** Convert little-endian IEEE-754 Float32 bytes to a FloatArray. */

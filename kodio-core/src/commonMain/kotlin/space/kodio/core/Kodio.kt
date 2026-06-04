@@ -2,6 +2,7 @@ package space.kodio.core
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import space.kodio.core.io.files.EncodedAudio
 import kotlin.time.Duration
 
 /**
@@ -265,6 +266,38 @@ object Kodio {
         val player = player(device)
         return try {
             player.load(recording)
+            block(player)
+        } catch (e: Exception) {
+            throw AudioError.from(e)
+        } finally {
+            player.release()
+        }
+    }
+
+    /**
+     * Plays encoded audio to completion using the platform's native media decoder.
+     */
+    suspend fun play(
+        encodedAudio: EncodedAudio,
+        device: AudioDevice.Output? = null
+    ) {
+        play(encodedAudio, device) { player ->
+            player.start()
+            player.awaitComplete()
+        }
+    }
+
+    /**
+     * Plays encoded audio with manual control via a lambda.
+     */
+    suspend fun <T> play(
+        encodedAudio: EncodedAudio,
+        device: AudioDevice.Output? = null,
+        block: suspend (Player) -> T
+    ): T {
+        val player = player(device)
+        return try {
+            player.load(encodedAudio)
             block(player)
         } catch (e: Exception) {
             throw AudioError.from(e)

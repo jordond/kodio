@@ -2,7 +2,9 @@ package space.kodio.core
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import space.kodio.core.io.files.EncodedAudio
 import javax.sound.sampled.SourceDataLine
+import kotlin.time.Duration
 
 /**
  * JVM implementation for [AudioPlaybackSession].
@@ -14,6 +16,7 @@ class JvmAudioPlaybackSession(private val device: AudioDevice.Output) : BaseAudi
     private val isPaused = MutableStateFlow(false)
 
     private var dataLine: SourceDataLine? = null
+    private val mp3Backend = JvmMp3PlaybackBackend(device)
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         val mixer = getMixer(device)
@@ -38,20 +41,37 @@ class JvmAudioPlaybackSession(private val device: AudioDevice.Output) : BaseAudi
         line.close()
     }
 
+    override suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? =
+        mp3Backend.load(encodedAudio)
+
+    override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
+        mp3Backend.playBlocking(startPosition)
+    }
+
+    override fun seekLoadedEncodedAudio(position: Duration) = Unit
+
     override fun onPause() {
+        mp3Backend.pause()
         dataLine?.stop()
         isPaused.value = true
     }
 
     override fun onResume() {
         isPaused.value = false
+        mp3Backend.resume()
         dataLine?.start()
     }
 
     override fun onStop() {
+        mp3Backend.stop()
         isPaused.value = false
         dataLine?.stop()
         dataLine?.flush()
         dataLine?.close()
+        dataLine = null
+    }
+
+    override fun releaseLoadedEncodedAudio() {
+        mp3Backend.release()
     }
 }

@@ -83,3 +83,86 @@ actual fun <T : JsAny?> JsArray<T>.toList(): List<T> =
 
 actual fun createAudioWorkletNode(context: BaseAudioContext, name: String): AudioWorkletNode =
     AudioWorkletNode(context, name.toJsString().unsafeCast<AudioWorkletProcessorName>())
+
+internal actual fun createEncodedAudioElement(bytes: ByteArray, mimeType: String): JsAny {
+    val typedBytes = newJsUint8Array(bytes.size)
+    for (i in bytes.indices) {
+        setJsUint8ArrayValue(typedBytes, i, bytes[i].toInt() and 0xFF)
+    }
+    return createEncodedAudioElementFromBytes(typedBytes, mimeType.toJsString())
+}
+
+@Suppress("unused")
+private fun newJsUint8Array(length: Int): JsAny =
+    js("new Uint8Array(length)")
+
+@Suppress("unused")
+private fun setJsUint8ArrayValue(array: JsAny, index: Int, value: Int) {
+    js("array[index] = value;")
+}
+
+@Suppress("unused")
+private fun createEncodedAudioElementFromBytes(bytes: JsAny, mimeType: JsAny): JsAny {
+    js(
+        """
+        const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+        const audio = new Audio(url);
+        audio.preload = 'auto';
+        audio.__kodioObjectUrl = url;
+        return audio;
+        """
+    )
+}
+
+internal actual fun loadEncodedAudioElement(element: JsAny) {
+    js("element.load();")
+}
+
+internal actual fun encodedAudioElementReadyState(element: JsAny): Int =
+    js("element.readyState")
+
+internal actual fun encodedAudioElementDuration(element: JsAny): Double =
+    js("element.duration")
+
+internal actual fun encodedAudioElementEnded(element: JsAny): Boolean =
+    js("element.ended")
+
+internal actual fun encodedAudioElementSetCurrentTime(element: JsAny, seconds: Double) {
+    js("element.currentTime = seconds;")
+}
+
+internal actual fun encodedAudioElementPlay(element: JsAny) {
+    js(
+        """
+        element.__kodioPlayError = null;
+        const promise = element.play();
+        if (promise && typeof promise.catch === 'function') {
+          promise.catch(error => {
+            element.__kodioPlayError =
+              error && error.message ? error.message : String(error);
+          });
+        }
+        """
+    )
+}
+
+internal actual fun encodedAudioElementPlayError(element: JsAny): String? =
+    js("element.__kodioPlayError || null")
+
+internal actual fun encodedAudioElementPause(element: JsAny) {
+    js("element.pause();")
+}
+
+internal actual fun encodedAudioElementStopAndRelease(element: JsAny) {
+    js(
+        """
+        element.pause();
+        element.removeAttribute('src');
+        element.load();
+        if (element.__kodioObjectUrl) {
+          URL.revokeObjectURL(element.__kodioObjectUrl);
+          element.__kodioObjectUrl = null;
+        }
+        """
+    )
+}

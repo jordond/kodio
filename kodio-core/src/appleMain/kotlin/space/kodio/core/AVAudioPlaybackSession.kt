@@ -3,16 +3,30 @@ package space.kodio.core
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.lastOrNull
 import kotlinx.coroutines.flow.map
+import kotlinx.io.Buffer
+import kotlinx.io.files.Path
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.files.SystemTemporaryDirectory
+import kotlinx.io.write
 import platform.AVFAudio.AVAudioConverter
 import platform.AVFAudio.AVAudioEngine
 import platform.AVFAudio.AVAudioFormat
 import platform.AVFAudio.AVAudioPCMFormatFloat32
+import platform.AVFAudio.AVAudioPlayer
 import platform.AVFAudio.AVAudioPlayerNode
+import platform.Foundation.NSURL
+import space.kodio.core.io.files.AudioFileFormat
+import space.kodio.core.io.files.AudioFileReadError
+import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.io.convertSimple
 import space.kodio.core.io.toIosAudioBuffer
 import space.kodio.core.util.namedLogger
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 private val log = namedLogger("AVAudioPlayback")
 
@@ -23,6 +37,8 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
     private lateinit var standardAVFormat: AVAudioFormat
     private lateinit var interleavedAVFormat: AVAudioFormat
     private var deinterleaveConverter: AVAudioConverter? = null
+    private var encodedPlayer: AVAudioPlayer? = null
+    private var encodedTempPath: Path? = null
 
     init {
         engine.attachNode(player)
@@ -143,23 +159,91 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
         log.info { "playBlocking() finished" }
     }
 
+    @OptIn(ExperimentalForeignApi::class)
+    override suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? {
+        if (encodedAudio.fileFormat !is AudioFileFormat.Mp3) {
+            throw AudioFileReadError.UnsupportedFormat(
+                "Direct playback is only implemented for MP3 on Apple targets."
+            )
+        }
+        val bytes = encodedAudio.toByteArray()
+        val path = writeEncodedTempFile(bytes, encodedAudio.fileFormat.extension)
+        val url = NSURL.fileURLWithPath(path.toString())
+        val player = runErrorCatching { errorVar ->
+            AVAudioPlayer(contentsOfURL = url, error = errorVar)
+        }.getOrElse {
+            throw AudioFileReadError.InvalidFile("Unable to load MP3 data: ${it.message}", it)
+        }
+        configureAudioSession()
+        if (!player.prepareToPlay()) {
+            runCatching { SystemFileSystem.delete(path, mustExist = false) }
+            throw AudioFileReadError.InvalidFile("Unable to prepare MP3 data for playback.")
+        }
+        releaseLoadedEncodedAudio()
+        encodedPlayer = player
+        encodedTempPath = path
+        return player.duration.seconds
+    }
+
+    override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
+        val player = encodedPlayer ?: return
+        player.currentTime = startPosition.inWholeMilliseconds / 1000.0
+        if (!player.play()) {
+            throw AudioFileReadError.InvalidFile("Unable to start MP3 playback.")
+        }
+        while (player.isPlaying() || state.value is AudioPlaybackSession.State.Paused) {
+            delay(50.milliseconds)
+        }
+    }
+
+    override fun seekLoadedEncodedAudio(position: Duration) {
+        encodedPlayer?.currentTime = position.inWholeMilliseconds / 1000.0
+    }
+
     override fun onPause() {
         log.info { "onPause()" }
+        encodedPlayer?.pause()
         if (player.isPlaying())
             player.pause()
     }
 
     override fun onResume() {
         log.info { "onResume()" }
+        encodedPlayer?.play()
         player.play()
     }
 
     override fun onStop() {
         log.info { "onStop()" }
+        encodedPlayer?.let {
+            it.stop()
+            it.currentTime = 0.0
+        }
         if (player.isPlaying())
             player.stop()
         engine.stop()
         engine.disconnectNodeOutput(player)
         log.info { "Engine stopped and nodes disconnected" }
+    }
+
+    override fun releaseLoadedEncodedAudio() {
+        encodedPlayer?.stop()
+        encodedPlayer = null
+        encodedTempPath?.let {
+            runCatching { SystemFileSystem.delete(it, mustExist = false) }
+        }
+        encodedTempPath = null
+    }
+
+    private fun writeEncodedTempFile(bytes: ByteArray, extension: String): Path {
+        val path = Path(
+            SystemTemporaryDirectory,
+            "kodio-${kotlin.random.Random.nextLong().toString(16)}.$extension"
+        )
+        SystemFileSystem.sink(path).use { sink ->
+            val buffer = Buffer().apply { write(bytes) }
+            sink.write(buffer, buffer.size)
+        }
+        return path
     }
 }

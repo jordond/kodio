@@ -28,6 +28,9 @@ class AudioFileWriter(
             is AudioFileFormat.Wav -> writeWav(audioDataSource, audioFileBuffer)
             is AudioFileFormat.Aiff -> writeAiff(audioDataSource, audioFileBuffer)
             is AudioFileFormat.Au -> writeAu(audioDataSource, audioFileBuffer)
+            is AudioFileFormat.Mp3 -> throw AudioFileWriteError.UnsupportedFormat(
+                "MP3 encoding is not supported."
+            )
         }
         // --- Write the completed buffer to the actual file on disk ---
         try {

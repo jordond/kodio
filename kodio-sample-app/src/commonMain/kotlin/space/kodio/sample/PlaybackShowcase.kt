@@ -28,17 +28,20 @@ import space.kodio.compose.WaveformColors
 import space.kodio.compose.WaveformStyle
 import space.kodio.compose.rememberPlayerState
 import space.kodio.core.AudioDevice
+import space.kodio.core.AudioPlaybackSession
 import space.kodio.core.AudioRecording
 import space.kodio.core.Channels
 import space.kodio.core.Kodio
 import space.kodio.core.SampleEncoding
 import space.kodio.core.io.files.AudioFileFormat
 import space.kodio.core.io.files.AudioFileReadError
+import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.io.files.fromBytes
 
 @Composable
 fun PlaybackShowcase() {
     var recording by remember { mutableStateOf<AudioRecording?>(null) }
+    var encodedAudio by remember { mutableStateOf<EncodedAudio?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var fileName by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
@@ -59,12 +62,19 @@ fun PlaybackShowcase() {
         scope.launch {
             try {
                 val fileFormat = when {
+                    name.endsWith(".mp3", true) -> AudioFileFormat.Mp3
                     name.endsWith(".aiff", true) || name.endsWith(".aif", true) -> AudioFileFormat.Aiff
                     name.endsWith(".au", true) || name.endsWith(".snd", true) -> AudioFileFormat.Au
                     else -> AudioFileFormat.Wav
                 }
-                val rec = AudioRecording.fromBytes(bytes, fileFormat)
-                recording = rec
+                if (fileFormat is AudioFileFormat.Mp3) {
+                    encodedAudio = EncodedAudio.fromBytes(bytes, fileFormat, name)
+                    recording = null
+                } else {
+                    val rec = AudioRecording.fromBytes(bytes, fileFormat)
+                    recording = rec
+                    encodedAudio = null
+                }
             } catch (e: AudioFileReadError.InvalidFile) {
                 error = "Invalid audio file: ${e.message}"
             } catch (e: AudioFileReadError.UnsupportedFormat) {
@@ -94,6 +104,7 @@ fun PlaybackShowcase() {
 
         FileSelectionCard(
             recording = recording,
+            encodedAudio = encodedAudio,
             fileName = fileName,
             isLoading = isLoading,
             isPicking = isPicking,
@@ -103,7 +114,7 @@ fun PlaybackShowcase() {
                     isPicking = true
                     scope.launch {
                         try {
-                            val file = pickFile(listOf("wav", "wave", "aiff", "aif", "au", "snd"))
+                            val file = pickFile(listOf("wav", "wave", "aiff", "aif", "au", "snd", "mp3"))
                             if (file != null) {
                                 val bytes = file.readBytes()
                                 loadAudioBytes(file.name, bytes)
@@ -119,6 +130,7 @@ fun PlaybackShowcase() {
             },
             onClear = {
                 recording = null
+                encodedAudio = null
                 fileName = null
                 error = null
             },
@@ -144,12 +156,16 @@ fun PlaybackShowcase() {
         recording?.let { rec ->
             PlaybackCard(rec, selectedOutputDevice)
         }
+        encodedAudio?.let { encoded ->
+            EncodedPlaybackCard(encoded, selectedOutputDevice)
+        }
     }
 }
 
 @Composable
 private fun FileSelectionCard(
     recording: AudioRecording?,
+    encodedAudio: EncodedAudio?,
     fileName: String?,
     isLoading: Boolean,
     isPicking: Boolean,
@@ -196,6 +212,16 @@ private fun FileSelectionCard(
                         )
                     }
 
+                    encodedAudio != null -> {
+                        LoadedEncodedFileContent(
+                            encodedAudio = encodedAudio,
+                            fileName = fileName,
+                            isPicking = isPicking,
+                            onPickFile = onPickFile,
+                            onClear = onClear,
+                        )
+                    }
+
                     else -> {
                         Text(
                             "Select an audio file",
@@ -205,7 +231,7 @@ private fun FileSelectionCard(
                         )
 
                         Text(
-                            "WAV, AIFF, AU files supported \u2022 drag and drop on desktop",
+                            "WAV, AIFF, AU, MP3 files supported \u2022 drag and drop on desktop",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -224,6 +250,53 @@ private fun FileSelectionCard(
             exit = fadeOut()
         ) {
             DropOverlay()
+        }
+    }
+}
+
+@Composable
+private fun LoadedEncodedFileContent(
+    encodedAudio: EncodedAudio,
+    fileName: String?,
+    isPicking: Boolean,
+    onPickFile: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Text(
+        text = fileName ?: "Loaded MP3",
+        style = MaterialTheme.typography.titleMedium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+
+    Text(
+        text = "MP3, native playback",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Text(
+        text = "Size: ${formatFileSize(encodedAudio.sizeInBytes.toLong())}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Spacer(Modifier.height(4.dp))
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedButton(onClick = onPickFile, enabled = !isPicking) {
+            Text(if (isPicking) "Picking..." else "Replace")
+        }
+        TextButton(
+            onClick = onClear,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = MaterialTheme.colorScheme.error
+            )
+        ) {
+            Text("Clear")
         }
     }
 }
@@ -326,6 +399,95 @@ private fun DropOverlay() {
             style = MaterialTheme.typography.titleMedium,
             color = primaryColor
         )
+    }
+}
+
+@Composable
+private fun EncodedPlaybackCard(encodedAudio: EncodedAudio, device: AudioDevice.Output? = null) {
+    val scope = rememberCoroutineScope()
+    var player by remember { mutableStateOf<space.kodio.core.Player?>(null) }
+    var playbackState by remember { mutableStateOf<AudioPlaybackSession.State>(AudioPlaybackSession.State.Idle) }
+
+    LaunchedEffect(encodedAudio, device) {
+        val p = Kodio.player(device)
+        player = p
+        p.load(encodedAudio)
+        try {
+            p.stateFlow.collect { playbackState = it }
+        } finally {
+            p.release()
+            player = null
+        }
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { player?.stop() },
+                    enabled = playbackState is AudioPlaybackSession.State.Playing ||
+                        playbackState is AudioPlaybackSession.State.Paused
+                ) {
+                    Icon(SampleIcons.Stop, contentDescription = "Stop")
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                FilledIconButton(
+                    onClick = {
+                        scope.launch {
+                            when (playbackState) {
+                                is AudioPlaybackSession.State.Playing -> player?.pause()
+                                is AudioPlaybackSession.State.Paused -> player?.resume()
+                                else -> player?.start()
+                            }
+                        }
+                    },
+                    enabled = player != null,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        imageVector = if (playbackState is AudioPlaybackSession.State.Playing)
+                            SampleIcons.Pause else SampleIcons.PlayArrow,
+                        contentDescription = if (playbackState is AudioPlaybackSession.State.Playing)
+                            "Pause" else "Play"
+                    )
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                Text(
+                    text = when (playbackState) {
+                        is AudioPlaybackSession.State.Playing -> "Playing"
+                        is AudioPlaybackSession.State.Paused -> "Paused"
+                        is AudioPlaybackSession.State.Finished -> "Finished"
+                        is AudioPlaybackSession.State.Error -> "Error"
+                        is AudioPlaybackSession.State.Ready -> "Ready"
+                        is AudioPlaybackSession.State.Idle -> "Idle"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (playbackState is AudioPlaybackSession.State.Error)
+                        MaterialTheme.colorScheme.error
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            (playbackState as? AudioPlaybackSession.State.Error)?.let { err ->
+                Text(
+                    text = err.error.message ?: "Playback error",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
     }
 }
 

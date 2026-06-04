@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalWasmJsInterop::class)
+
 package space.kodio.core
 
+import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.JsAny
 import kotlin.js.JsArray
 import js.buffer.ArrayBuffer
@@ -71,3 +74,69 @@ actual fun <T : JsAny?> JsArray<T>.toList(): List<T> {
 @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
 actual fun createAudioWorkletNode(context: BaseAudioContext, name: String): AudioWorkletNode =
     AudioWorkletNode(context, name.unsafeCast<AudioWorkletProcessorName>())
+
+internal actual fun createEncodedAudioElement(bytes: ByteArray, mimeType: String): JsAny =
+    js(
+        """
+        (() => {
+          const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+          const audio = new Audio(url);
+          audio.preload = 'auto';
+          audio.__kodioObjectUrl = url;
+          return audio;
+        })()
+        """
+    )
+
+internal actual fun loadEncodedAudioElement(element: JsAny) {
+    js("element.load();")
+}
+
+internal actual fun encodedAudioElementReadyState(element: JsAny): Int =
+    js("element.readyState")
+
+internal actual fun encodedAudioElementDuration(element: JsAny): Double =
+    js("element.duration")
+
+internal actual fun encodedAudioElementEnded(element: JsAny): Boolean =
+    js("element.ended")
+
+internal actual fun encodedAudioElementSetCurrentTime(element: JsAny, seconds: Double) {
+    js("element.currentTime = seconds;")
+}
+
+internal actual fun encodedAudioElementPlay(element: JsAny) {
+    js(
+        """
+        element.__kodioPlayError = null;
+        const promise = element.play();
+        if (promise && typeof promise.catch === 'function') {
+          promise.catch(error => {
+            element.__kodioPlayError =
+              error && error.message ? error.message : String(error);
+          });
+        }
+        """
+    )
+}
+
+internal actual fun encodedAudioElementPlayError(element: JsAny): String? =
+    js("element.__kodioPlayError || null")
+
+internal actual fun encodedAudioElementPause(element: JsAny) {
+    js("element.pause();")
+}
+
+internal actual fun encodedAudioElementStopAndRelease(element: JsAny) {
+    js(
+        """
+        element.pause();
+        element.removeAttribute('src');
+        element.load();
+        if (element.__kodioObjectUrl) {
+          URL.revokeObjectURL(element.__kodioObjectUrl);
+          element.__kodioObjectUrl = null;
+        }
+        """
+    )
+}

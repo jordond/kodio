@@ -76,6 +76,7 @@ private fun audioFileFormatForName(name: String): AudioFileFormat = when {
     name.endsWith(".wav", true) || name.endsWith(".wave", true) -> AudioFileFormat.Wav
     name.endsWith(".aiff", true) || name.endsWith(".aif", true) -> AudioFileFormat.Aiff
     name.endsWith(".au", true) || name.endsWith(".snd", true) -> AudioFileFormat.Au
+    name.endsWith(".mp3", true) -> AudioFileFormat.Mp3
     else -> AudioFileFormat.Wav
 }
 
@@ -83,6 +84,7 @@ private fun containerLabel(format: AudioFileFormat): String = when (format) {
     is AudioFileFormat.Wav -> "WAV"
     is AudioFileFormat.Aiff -> "AIFF"
     is AudioFileFormat.Au -> "AU"
+    is AudioFileFormat.Mp3 -> "MP3"
 }
 
 private fun encodingChoiceToSampleEncoding(
@@ -92,6 +94,7 @@ private fun encodingChoiceToSampleEncoding(
     val endianness = when (container) {
         is AudioFileFormat.Wav -> Endianness.Little
         is AudioFileFormat.Aiff, is AudioFileFormat.Au -> Endianness.Big
+        is AudioFileFormat.Mp3 -> throw IllegalArgumentException("MP3 output is not supported.")
     }
     return when (choice) {
         EncodingChoice.Pcm8 ->
@@ -385,13 +388,13 @@ fun ConversionShowcase() {
 
                         Text("File format", style = MaterialTheme.typography.labelMedium)
                         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            AudioFileFormat.entries.forEachIndexed { index, fmt ->
+                            AudioFileFormat.writableEntries.forEachIndexed { index, fmt ->
                                 SegmentedButton(
                                     selected = targetFileFormat == fmt,
                                     onClick = { targetFileFormat = fmt },
                                     shape = SegmentedButtonDefaults.itemShape(
                                         index = index,
-                                        count = AudioFileFormat.entries.size,
+                                        count = AudioFileFormat.writableEntries.size,
                                     ),
                                 ) {
                                     Text(containerLabel(fmt), maxLines = 1)

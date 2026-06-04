@@ -19,6 +19,7 @@ kotlinx-io = "0.9.0"
 kotlinx-serialization = "1.10.0"
 kotlinxBenchmarkRuntime = "0.4.14"
 ktor3 = "3.4.2"
+jlayer = "1.0.1"
 material-icons = "1.7.3"
 
 [libraries]
@@ -44,6 +45,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 kotlinx-io = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinx-io" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 bignum = { module = "com.ionspin.kotlin:bignum", version = "0.3.10" }
+jlayer = { module = "javazoom:jlayer", version.ref = "jlayer" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor3" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor3" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor3" }

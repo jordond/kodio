@@ -1,10 +1,14 @@
 package space.kodio.core
 
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import space.kodio.core.io.files.AudioFileFormat
+import space.kodio.core.io.files.EncodedAudio
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -482,9 +486,11 @@ class RecorderPlayerTest {
 
         session.load(recording)
         session.play()
+        session.waitForPlayedChunkCount(1)
         session.state.first { it is AudioPlaybackSession.State.Finished }
 
         session.play()
+        session.waitForPlayedChunkCount(2)
         session.state.first { it is AudioPlaybackSession.State.Finished }
 
         assertEquals(2, session.seekPositions.size)
@@ -520,6 +526,61 @@ class RecorderPlayerTest {
             session.seekTo(1.milliseconds)
         }
         assertFalse(session.canSeek.value)
+    }
+
+    @Test
+    fun `Base encoded stop keeps source loaded for replay until replacement`() = runTest {
+        val session = CollectingPlaybackSession()
+        val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
+
+        session.load(encoded)
+        session.play()
+        session.waitForEncodedPlayCount(1)
+        session.stop()
+
+        assertTrue(session.encodedAudio.value === encoded)
+        assertEquals(1, session.encodedStopCount)
+        assertEquals(0, session.encodedReleaseCount)
+
+        session.play()
+        session.waitForEncodedPlayCount(2)
+        session.stop()
+
+        session.load(AudioFlow(seekTestFormat, flowOf(ByteArray(1))))
+
+        assertEquals(2, session.encodedStopCount)
+        assertEquals(1, session.encodedReleaseCount)
+    }
+
+    @Test
+    fun `Base release frees loaded encoded backend`() = runTest {
+        val session = CollectingPlaybackSession()
+        val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
+
+        session.load(encoded)
+        session.release()
+
+        assertNull(session.encodedAudio.value)
+        assertEquals(1, session.encodedReleaseCount)
+        assertEquals(AudioPlaybackSession.State.Idle, session.state.value)
+    }
+
+    @Test
+    fun `Base failed encoded load does not publish failed source`() = runTest {
+        val session = CollectingPlaybackSession()
+        val recording = AudioRecording.fromBytes(seekTestFormat, byteArrayOf(1, 2, 3, 4))
+        val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
+
+        session.load(recording)
+        session.failEncodedLoad = true
+
+        assertFailsWith<IllegalStateException> {
+            session.load(encoded)
+        }
+
+        assertNull(session.encodedAudio.value)
+        assertNotNull(session.audioFlow.value)
+        assertTrue(session.state.value is AudioPlaybackSession.State.Error)
     }
 
     // ==================== Fake Implementations ====================
@@ -577,6 +638,9 @@ class RecorderPlayerTest {
         private val _audioFlow = MutableStateFlow<AudioFlow?>(null)
         override val audioFlow: StateFlow<AudioFlow?> = _audioFlow
 
+        private val _encodedAudio = MutableStateFlow<EncodedAudio?>(null)
+        override val encodedAudio: StateFlow<EncodedAudio?> = _encodedAudio
+
         private val _position = MutableStateFlow(Duration.ZERO)
         override val position: StateFlow<Duration> = _position
 
@@ -591,6 +655,7 @@ class RecorderPlayerTest {
 
         override suspend fun load(audioFlow: AudioFlow) {
             _audioFlow.value = audioFlow
+            _encodedAudio.value = null
             _position.value = Duration.ZERO
             _duration.value = null
             _canSeek.value = false
@@ -599,8 +664,18 @@ class RecorderPlayerTest {
 
         override suspend fun load(recording: AudioRecording) {
             _audioFlow.value = recording.asAudioFlow()
+            _encodedAudio.value = null
             _position.value = Duration.ZERO
             _duration.value = recording.calculatedDuration
+            _canSeek.value = true
+            _state.value = AudioPlaybackSession.State.Ready
+        }
+
+        override suspend fun load(encodedAudio: EncodedAudio) {
+            _audioFlow.value = null
+            _encodedAudio.value = encodedAudio
+            _position.value = Duration.ZERO
+            _duration.value = null
             _canSeek.value = true
             _state.value = AudioPlaybackSession.State.Ready
         }
@@ -636,6 +711,10 @@ class RecorderPlayerTest {
     private class CollectingPlaybackSession : BaseAudioPlaybackSession() {
         val playedChunks = mutableListOf<ByteArray>()
         val seekPositions = mutableListOf<Duration>()
+        val encodedStartPositions = mutableListOf<Duration>()
+        var encodedStopCount = 0
+        var encodedReleaseCount = 0
+        var failEncodedLoad = false
 
         override suspend fun preparePlayback(format: AudioFormat): AudioFormat = format
 
@@ -644,10 +723,42 @@ class RecorderPlayerTest {
             audioFlow.collect { playedChunks += it }
         }
 
+        override suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? {
+            check(!failEncodedLoad) { "encoded load failed" }
+            return 10.milliseconds
+        }
+
+        override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
+            encodedStartPositions += startPosition
+            awaitCancellation()
+        }
+
         override fun onPause() = Unit
 
         override fun onResume() = Unit
 
-        override fun onStop() = Unit
+        override fun onStop() {
+            encodedStopCount++
+        }
+
+        override fun releaseLoadedEncodedAudio() {
+            encodedReleaseCount++
+        }
+
+        suspend fun waitForEncodedPlayCount(count: Int) {
+            repeat(100) {
+                if (encodedStartPositions.size >= count) return
+                delay(10.milliseconds)
+            }
+            error("Timed out waiting for $count encoded playback starts")
+        }
+
+        suspend fun waitForPlayedChunkCount(count: Int) {
+            repeat(100) {
+                if (playedChunks.size >= count) return
+                delay(10.milliseconds)
+            }
+            error("Timed out waiting for $count played chunks")
+        }
     }
 }

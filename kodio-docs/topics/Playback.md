@@ -17,6 +17,13 @@ The easiest way to play audio is directly on a recording. This suspends until pl
 recording.play()
 ```
 
+MP3 files can be played directly as encoded audio:
+
+```kotlin
+val mp3 = EncodedAudio.fromBytes(mp3Bytes, AudioFileFormat.Mp3, "song.mp3")
+Kodio.play(mp3)
+```
+
 ## Playback with controls {id="with-controls"}
 
 When you need to pause, resume, seek, or monitor playback, use `Kodio.play()` with a lambda:
@@ -46,6 +53,10 @@ The lambda receives a `Player` instance that gives you full control over playbac
 Seeking is supported for `AudioRecording` sources loaded with `player.load(recording)`.
 Raw streaming `AudioFlow` sources loaded with `player.loadAudioFlow(audioFlow)` are not
 seekable because the stream may not be replayable.
+
+MP3 sources loaded with `player.load(encodedAudio)` use the platform media decoder
+directly instead of converting the file into an `AudioRecording`. JVM desktop
+uses JLayer for MP3 decode/playback through JavaSound.
 
 ## Using Player directly {id="player"}
 
@@ -118,6 +129,9 @@ Observable state changes for reactive UIs.
 <deflist type="medium">
 <def title="load(recording)">
 Load an <code>AudioRecording</code> for playback.
+</def>
+<def title="load(encodedAudio)">
+Load encoded audio, such as an MP3, for direct native playback.
 </def>
 <def title="start()">
 Begin or resume playback.

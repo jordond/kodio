@@ -527,7 +527,7 @@ private fun LiveRecordingTab(apiKey: String) {
 
 /**
  * File upload transcription tab.
- * Uses FileKit for cross-platform file picking (WAV, AIFF, AU — formats kodio-core decodes).
+ * Uses FileKit for cross-platform file picking (WAV, AIFF, AU — formats kodio-core decodes to PCM).
  */
 @Composable
 private fun FileUploadTab(apiKey: String) {
@@ -653,9 +653,7 @@ private fun FileUploadTab(apiKey: String) {
                         } catch (e: AudioFileReadError.UnsupportedFormat) {
                             log("Unsupported format: ${e.message}")
                             error =
-                                "Unsupported file format. WAV, AIFF and AU are supported. Compressed formats " +
-                                    "(MP3, M4A) are tracked in the Kodio repository's GitHub issues — " +
-                                    "see GitHub issues for follow-up."
+                                "Unsupported file format for transcription. Use WAV, AIFF, or AU so Kodio can decode PCM audio."
                             isTranscribing = false
                         } catch (e: Exception) {
                             val cls = e::class.simpleName ?: "Exception"
@@ -928,4 +926,3 @@ data class TranscriptionSegment(
     val text: String,
     val confidence: Float
 )
-

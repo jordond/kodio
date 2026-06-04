@@ -1,14 +1,26 @@
+@file:OptIn(ExperimentalWasmJsInterop::class)
+
 package space.kodio.core
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.lastOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import space.kodio.core.io.files.AudioFileFormat
+import space.kodio.core.io.files.AudioFileReadError
+import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.AudioPlaybackSession.State
 import web.audio.*
 import web.events.EventHandler
 import kotlin.coroutines.coroutineContext
+import kotlin.js.ExperimentalWasmJsInterop
+import kotlin.js.JsAny
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * TODO: support output device selection when setSinkId becomes widely adapted (https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/setSinkId)
@@ -16,6 +28,7 @@ import kotlin.coroutines.coroutineContext
 class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
 
     private var audioContext: AudioContext? = null
+    private var encodedElement: JsAny? = null
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         val contextOptions = createAudioContextOptions(
@@ -86,17 +99,71 @@ class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
         lastCompletable?.await()
     }
 
+    override suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? {
+        if (encodedAudio.fileFormat !is AudioFileFormat.Mp3) {
+            throw AudioFileReadError.UnsupportedFormat(
+                "Direct playback is only implemented for MP3 on web targets."
+            )
+        }
+        val element = createEncodedAudioElement(encodedAudio.toByteArray(), encodedAudio.fileFormat.mimeType)
+        loadEncodedAudioElement(element)
+        try {
+            withTimeout(5_000) {
+                while (encodedAudioElementReadyState(element) < 1) {
+                    delay(25.milliseconds)
+                }
+            }
+        } catch (e: Throwable) {
+            encodedAudioElementStopAndRelease(element)
+            throw e
+        }
+        val duration = encodedAudioElementDuration(element)
+        releaseLoadedEncodedAudio()
+        encodedElement = element
+        return if (duration.isFinite() && duration >= 0.0) duration.seconds else null
+    }
+
+    override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
+        val element = encodedElement ?: return
+        encodedAudioElementSetCurrentTime(element, startPosition.inWholeMilliseconds / 1000.0)
+        encodedAudioElementPlay(element)
+        while (!encodedAudioElementEnded(element)) {
+            val playError = encodedAudioElementPlayError(element)
+            if (playError != null) {
+                throw AudioFileReadError.InvalidFile("Unable to start MP3 playback: $playError")
+            }
+            delay(50.milliseconds)
+        }
+    }
+
+    override fun seekLoadedEncodedAudio(position: Duration) {
+        encodedElement?.let {
+            encodedAudioElementSetCurrentTime(it, position.inWholeMilliseconds / 1000.0)
+        }
+    }
+
     override fun onPause() {
+        encodedElement?.let(::encodedAudioElementPause)
         scope.launch { audioContext?.suspend() }
     }
 
     override fun onResume() {
+        encodedElement?.let(::encodedAudioElementPlay)
         scope.launch { audioContext?.resume() }
     }
 
     override fun onStop() {
+        encodedElement?.let {
+            encodedAudioElementPause(it)
+            encodedAudioElementSetCurrentTime(it, 0.0)
+        }
         val context = audioContext?:return
         audioContext = null
         scope.launch { context.close() }
+    }
+
+    override fun releaseLoadedEncodedAudio() {
+        encodedElement?.let(::encodedAudioElementStopAndRelease)
+        encodedElement = null
     }
 }

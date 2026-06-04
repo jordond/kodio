@@ -38,3 +38,14 @@ expect fun createAudioContextOptions(latencyHint: AudioContextLatencyCategory, s
 expect fun createMediaStreamConstraints(audio: MediaTrackConstraints): MediaStreamConstraints
 expect fun createMediaTrackConstraints(deviceId: String?, sampleRate: Int, sampleSize: Int, channelCount: Int): MediaTrackConstraints
 expect fun createAudioWorkletNode(context: BaseAudioContext, name: String): AudioWorkletNode
+
+internal expect fun createEncodedAudioElement(bytes: ByteArray, mimeType: String): JsAny
+internal expect fun loadEncodedAudioElement(element: JsAny)
+internal expect fun encodedAudioElementReadyState(element: JsAny): Int
+internal expect fun encodedAudioElementDuration(element: JsAny): Double
+internal expect fun encodedAudioElementEnded(element: JsAny): Boolean
+internal expect fun encodedAudioElementSetCurrentTime(element: JsAny, seconds: Double)
+internal expect fun encodedAudioElementPlay(element: JsAny)
+internal expect fun encodedAudioElementPlayError(element: JsAny): String?
+internal expect fun encodedAudioElementPause(element: JsAny)
+internal expect fun encodedAudioElementStopAndRelease(element: JsAny)

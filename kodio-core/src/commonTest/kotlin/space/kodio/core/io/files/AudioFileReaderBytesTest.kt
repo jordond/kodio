@@ -73,6 +73,25 @@ class AudioFileReaderBytesTest {
     }
 
     @Test
+    fun `mp3 extension creates encoded audio but is not writable`() {
+        val bytes = byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 0)
+        val encoded = EncodedAudio.fromBytes(bytes, "clip.mp3")
+
+        assertEquals(AudioFileFormat.Mp3, encoded.fileFormat)
+        assertContentEquals(bytes, encoded.toByteArray())
+        assertFalse(AudioFileFormat.Mp3 in AudioFileFormat.writableEntries)
+    }
+
+    @Test
+    fun `mp3 cannot be decoded as AudioRecording yet`() {
+        val ex = assertFailsWith<AudioFileReadError.UnsupportedFormat> {
+            AudioFileReader.read(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte()), "clip.mp3")
+        }
+
+        assertTrue(ex.message!!.contains("EncodedAudio"))
+    }
+
+    @Test
     fun `unsupported extension throws UnsupportedFormat`() {
         val ex = assertFailsWith<AudioFileReadError.UnsupportedFormat> {
             AudioFileReader.read(makeWavBytes(), "clip.m4a")

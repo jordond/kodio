@@ -29,7 +29,13 @@ actual fun Modifier.audioFileDropTarget(
                     val uris = dragData.readFiles()
                     val wavUri = uris.firstOrNull { uri ->
                         val lower = uri.lowercase()
-                        lower.endsWith(".wav") || lower.endsWith(".wave")
+                        lower.endsWith(".wav") ||
+                            lower.endsWith(".wave") ||
+                            lower.endsWith(".aiff") ||
+                            lower.endsWith(".aif") ||
+                            lower.endsWith(".au") ||
+                            lower.endsWith(".snd") ||
+                            lower.endsWith(".mp3")
                     }
                     if (wavUri != null) {
                         try {

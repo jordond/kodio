@@ -40,6 +40,9 @@ class AudioFileReader(
                     is AudioFileFormat.Wav -> readWav(source)
                     is AudioFileFormat.Aiff -> readAiff(source)
                     is AudioFileFormat.Au -> readAu(source)
+                    is AudioFileFormat.Mp3 -> throw AudioFileReadError.UnsupportedFormat(
+                        "MP3 cannot be loaded as AudioRecording yet. Use EncodedAudio.fromBytes(...) and Player.load(...) for direct MP3 playback."
+                    )
                 }
             }
         } catch (e: AudioFileReadError) {
@@ -74,6 +77,9 @@ class AudioFileReader(
                     is AudioFileFormat.Wav -> readWav(source)
                     is AudioFileFormat.Aiff -> readAiff(source)
                     is AudioFileFormat.Au -> readAu(source)
+                    is AudioFileFormat.Mp3 -> throw AudioFileReadError.UnsupportedFormat(
+                        "MP3 cannot be loaded as AudioRecording yet. Use EncodedAudio.fromBytes(...) and Player.load(...) for direct MP3 playback."
+                    )
                 }
             } catch (e: AudioFileReadError) {
                 throw e
@@ -97,6 +103,7 @@ class AudioFileReader(
                 "wav", "wave" -> AudioFileFormat.Wav
                 "aiff", "aif" -> AudioFileFormat.Aiff
                 "au", "snd" -> AudioFileFormat.Au
+                "mp3" -> AudioFileFormat.Mp3
                 else -> throw AudioFileReadError.UnsupportedFormat(
                     "Unsupported file extension: '$ext'"
                 )

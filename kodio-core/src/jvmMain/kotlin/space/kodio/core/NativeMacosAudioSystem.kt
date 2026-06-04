@@ -12,6 +12,7 @@ import space.kodio.core.io.convertAudio
 import space.kodio.core.io.decodeAsAudioRecordingState
 import space.kodio.core.io.decodeAsAudioFormat
 import space.kodio.core.io.encodeToByteArray
+import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.io.readAudioDevice
 import space.kodio.core.security.AudioPermissionManager
 import space.kodio.core.util.namedLogger
@@ -124,6 +125,7 @@ internal object NativeMacosAudioSystem : SystemAudioSystemImpl() {
             }
             NativeMacosAudioPlaybackSession(
                 nativeMemSeq = sessionSeq,
+                requestedDevice = requestedDevice,
             )
         }
     }
@@ -376,6 +378,7 @@ private class NativeMacosAudioRecordingSession(
  */
 private class NativeMacosAudioPlaybackSession(
     private val nativeMemSeq: MemorySegment,
+    requestedDevice: AudioDevice.Output?,
 ) : AudioPlaybackSession {
 
     private val _state = MutableStateFlow<AudioPlaybackSession.State>(AudioPlaybackSession.State.Idle)
@@ -383,6 +386,9 @@ private class NativeMacosAudioPlaybackSession(
 
     private val _audioFlowHolder = MutableStateFlow<AudioFlow?>(null)
     override val audioFlow: StateFlow<AudioFlow?> = _audioFlowHolder.asStateFlow()
+
+    private val _encodedAudio = MutableStateFlow<EncodedAudio?>(null)
+    override val encodedAudio: StateFlow<EncodedAudio?> = _encodedAudio.asStateFlow()
 
     private val _position = MutableStateFlow(Duration.ZERO)
     override val position: StateFlow<Duration> = _position.asStateFlow()
@@ -402,11 +408,14 @@ private class NativeMacosAudioPlaybackSession(
     private var positionStartedAt: TimeSource.Monotonic.ValueTimeMark? = null
     private var positionAtStart: Duration = Duration.ZERO
     private val completionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val mp3Backend = JvmMp3PlaybackBackend(requestedDevice)
 
     override suspend fun load(audioFlow: AudioFlow) {
         stopPositionTracking(updatePosition = false)
         completionJob?.cancel()
+        mp3Backend.release()
         _audioFlowHolder.value = audioFlow
+        _encodedAudio.value = null
         loadedRecording = null
         resumeShouldPlayFromSeek = false
         _position.value = Duration.ZERO
@@ -418,13 +427,34 @@ private class NativeMacosAudioPlaybackSession(
     override suspend fun load(recording: AudioRecording) {
         stopPositionTracking(updatePosition = false)
         completionJob?.cancel()
+        mp3Backend.release()
         loadedRecording = recording
         resumeShouldPlayFromSeek = false
         _audioFlowHolder.value = recording.asAudioFlow()
+        _encodedAudio.value = null
         _position.value = Duration.ZERO
         _duration.value = recording.calculatedDuration
         _canSeek.value = true
         loadNative(recording.asAudioFlow())
+    }
+
+    override suspend fun load(encodedAudio: EncodedAudio) {
+        stop()
+        closePreviousArena()
+        val loadedDuration = runCatching { mp3Backend.load(encodedAudio) }
+            .getOrElse {
+                _state.value = AudioPlaybackSession.State.Error(it)
+                throw it
+            }
+        loaded = false
+        loadedRecording = null
+        resumeShouldPlayFromSeek = false
+        _audioFlowHolder.value = null
+        _encodedAudio.value = encodedAudio
+        _position.value = Duration.ZERO
+        _duration.value = loadedDuration
+        _canSeek.value = true
+        _state.value = AudioPlaybackSession.State.Ready
     }
 
     private suspend fun loadNative(audioFlow: AudioFlow) {
@@ -475,6 +505,12 @@ private class NativeMacosAudioPlaybackSession(
     }
 
     override suspend fun play() {
+        val encodedAudio = _encodedAudio.value
+        if (encodedAudio != null) {
+            playEncoded(encodedAudio)
+            return
+        }
+
         if (!loaded) return
 
         val duration = _duration.value
@@ -517,6 +553,33 @@ private class NativeMacosAudioPlaybackSession(
     }
 
     override suspend fun seekTo(position: Duration) {
+        val encodedAudio = _encodedAudio.value
+        if (encodedAudio != null) {
+            val targetPosition = normalizedEncodedSeekPosition(position)
+            val wasPlaying = _state.value is AudioPlaybackSession.State.Playing
+            val wasPaused = _state.value is AudioPlaybackSession.State.Paused
+
+            if (wasPlaying || wasPaused) {
+                stopPositionTracking(updatePosition = false)
+                completionJob?.cancel()
+                mp3Backend.stop()
+            }
+
+            _position.value = targetPosition
+            val duration = _duration.value
+            if (wasPlaying && (duration == null || targetPosition < duration)) {
+                _state.value = AudioPlaybackSession.State.Ready
+                play()
+            } else {
+                _state.value = when {
+                    duration != null && targetPosition >= duration -> AudioPlaybackSession.State.Finished
+                    wasPaused -> AudioPlaybackSession.State.Paused
+                    else -> AudioPlaybackSession.State.Ready
+                }
+            }
+            return
+        }
+
         val recording = loadedRecording ?: throw AudioError.SeekUnsupported()
         val targetPosition = recording.normalizedSeekPosition(position)
         val wasPlaying = _state.value is AudioPlaybackSession.State.Playing
@@ -547,12 +610,23 @@ private class NativeMacosAudioPlaybackSession(
     override fun pause() {
         if (_state.value !is AudioPlaybackSession.State.Playing) return
         stopPositionTracking(updatePosition = true)
+        if (_encodedAudio.value != null) {
+            mp3Backend.pause()
+            _state.value = AudioPlaybackSession.State.Paused
+            return
+        }
         NativeMacosLib.macos_playback_session_pause.invokeExact(nativeMemSeq)
         _state.value = AudioPlaybackSession.State.Paused
     }
 
     override fun resume() {
         if (_state.value !is AudioPlaybackSession.State.Paused) return
+        if (_encodedAudio.value != null) {
+            mp3Backend.resume()
+            _state.value = AudioPlaybackSession.State.Playing
+            startPositionTracking(_position.value)
+            return
+        }
         if (resumeShouldPlayFromSeek) {
             resumeShouldPlayFromSeek = false
             completionScope.launch { play() }
@@ -566,10 +640,65 @@ private class NativeMacosAudioPlaybackSession(
     override fun stop() {
         stopPositionTracking(updatePosition = false)
         completionJob?.cancel()
+        mp3Backend.stop()
         if (loaded) NativeMacosLib.macos_playback_session_stop.invokeExact(nativeMemSeq)
         resumeShouldPlayFromSeek = false
         _position.value = Duration.ZERO
         _state.value = AudioPlaybackSession.State.Idle
+    }
+
+    override fun release() {
+        stop()
+        mp3Backend.release()
+        closePreviousArena()
+        loaded = false
+        loadedRecording = null
+        _audioFlowHolder.value = null
+        _encodedAudio.value = null
+        _duration.value = null
+        _canSeek.value = false
+        _state.value = AudioPlaybackSession.State.Idle
+    }
+
+    private fun playEncoded(encodedAudio: EncodedAudio) {
+        if (_state.value is AudioPlaybackSession.State.Finished) {
+            _position.value = Duration.ZERO
+        }
+        val duration = _duration.value
+        if (duration != null && _position.value >= duration) {
+            _position.value = duration
+            _state.value = AudioPlaybackSession.State.Finished
+            return
+        }
+
+        stopPositionTracking(updatePosition = false)
+        completionJob?.cancel()
+        mp3Backend.stop()
+
+        val startPosition = _position.value
+        _state.value = AudioPlaybackSession.State.Playing
+        startPositionTracking(startPosition)
+
+        completionJob = completionScope.launch {
+            runCatching {
+                mp3Backend.playBlocking(startPosition)
+                stopPositionTracking(updatePosition = true)
+                _position.value = _duration.value ?: _position.value
+                AudioPlaybackSession.State.Finished
+            }.getOrElse {
+                if (it is CancellationException) return@launch
+                stopPositionTracking(updatePosition = true)
+                AudioPlaybackSession.State.Error(it)
+            }.also {
+                _state.value = it
+            }
+        }
+    }
+
+    private fun normalizedEncodedSeekPosition(position: Duration): Duration {
+        if (position < Duration.ZERO) throw AudioError.InvalidSeekPosition(position)
+        val duration = _duration.value
+        return if (duration != null && position > duration) duration else position
     }
 
     private fun startPositionTracking(startPosition: Duration) {

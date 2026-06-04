@@ -22,6 +22,9 @@ suspend fun AudioFlow.writeToSink(format: AudioFileFormat, sink: Sink) {
         AudioFileFormat.Wav -> writeWav(source, sink)
         AudioFileFormat.Aiff -> writeAiff(source, sink)
         AudioFileFormat.Au -> writeAu(source, sink)
+        AudioFileFormat.Mp3 -> throw AudioFileWriteError.UnsupportedFormat(
+            "MP3 encoding is not supported."
+        )
     }
 }
 

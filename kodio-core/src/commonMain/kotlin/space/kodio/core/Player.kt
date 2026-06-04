@@ -2,6 +2,7 @@ package space.kodio.core
 
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import space.kodio.core.io.files.EncodedAudio
 import kotlin.time.Duration
 
 /**
@@ -86,7 +87,7 @@ class Player internal constructor(
      * This includes Ready, Paused, and Finished states where audio is available.
      */
     val isReady: Boolean
-        get() = session.audioFlow.value != null && 
+        get() = (session.audioFlow.value != null || session.encodedAudio.value != null) &&
                 session.state.value.let { state ->
                     state is AudioPlaybackSession.State.Ready ||
                     state is AudioPlaybackSession.State.Paused ||
@@ -104,6 +105,13 @@ class Player internal constructor(
      */
     suspend fun load(recording: AudioRecording) {
         session.load(recording)
+    }
+
+    /**
+     * Loads encoded audio for platform-native playback.
+     */
+    suspend fun load(encodedAudio: EncodedAudio) {
+        session.load(encodedAudio)
     }
 
     /**
@@ -192,7 +200,7 @@ class Player internal constructor(
      * The player should not be used after calling this method.
      */
     fun release() {
-        session.stop()
+        session.release()
     }
 
     /**

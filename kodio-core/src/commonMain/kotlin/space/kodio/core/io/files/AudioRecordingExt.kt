@@ -50,6 +50,9 @@ fun AudioRecording.Companion.fromSource(
         is AudioFileFormat.Wav -> readWav(source)
         is AudioFileFormat.Aiff -> readAiff(source)
         is AudioFileFormat.Au -> readAu(source)
+        is AudioFileFormat.Mp3 -> throw AudioFileReadError.UnsupportedFormat(
+            "MP3 cannot be loaded as AudioRecording yet. Use EncodedAudio.fromBytes(...) and Player.load(...) for direct MP3 playback."
+        )
     }
     val pcmBytes = audioSource.source.readByteArray()
     return AudioRecording.fromOwnedChunks(

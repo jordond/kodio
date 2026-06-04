@@ -2,7 +2,10 @@ package space.kodio.core
 
 import space.kodio.core.AudioPlaybackSession.State
 import space.kodio.core.io.convertAudio
+import space.kodio.core.io.files.AudioFileReadError
+import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.util.namedLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -33,6 +36,9 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     private val _audioFlow = MutableStateFlow<AudioFlow?>(null)
     override val audioFlow: StateFlow<AudioFlow?> = _audioFlow.asStateFlow()
 
+    private val _encodedAudio = MutableStateFlow<EncodedAudio?>(null)
+    override val encodedAudio: StateFlow<EncodedAudio?> = _encodedAudio.asStateFlow()
+
     private val _position = MutableStateFlow(Duration.ZERO)
     override val position: StateFlow<Duration> = _position.asStateFlow()
 
@@ -50,6 +56,21 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
 
     abstract suspend fun playBlocking(audioFlow: AudioFlow)
 
+    protected open suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? =
+        throw AudioFileReadError.UnsupportedFormat(
+            "Direct playback is not supported for ${encodedAudio.fileFormat.extension} on this platform."
+        )
+
+    protected open suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
+        throw AudioFileReadError.UnsupportedFormat(
+            "Direct playback is not supported for ${encodedAudio.fileFormat.extension} on this platform."
+        )
+    }
+
+    protected open fun seekLoadedEncodedAudio(position: Duration) = Unit
+
+    protected open fun releaseLoadedEncodedAudio() = onStop()
+
     protected abstract fun onPause()
     protected abstract fun onResume()
     protected abstract fun onStop()
@@ -57,8 +78,10 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     final override suspend fun load(audioFlow: AudioFlow) {
         log.info { "load(): format=${audioFlow.format}" }
         stopCurrentPlayback()
+        releaseLoadedEncodedIfIdle()
         loadedRecording = null
         _audioFlow.value = audioFlow
+        _encodedAudio.value = null
         _position.value = Duration.ZERO
         _duration.value = null
         _canSeek.value = false
@@ -68,8 +91,10 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     final override suspend fun load(recording: AudioRecording) {
         log.info { "load(recording): format=${recording.format}, duration=${recording.calculatedDuration}" }
         stopCurrentPlayback()
+        releaseLoadedEncodedIfIdle()
         loadedRecording = recording
         _audioFlow.value = recording.asAudioFlow()
+        _encodedAudio.value = null
         _position.value = Duration.ZERO
         _duration.value = recording.calculatedDuration
         _canSeek.value = true
@@ -77,6 +102,12 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     }
 
     final override suspend fun play() {
+        val encodedAudio = _encodedAudio.value
+        if (encodedAudio != null) {
+            playEncoded(encodedAudio)
+            return
+        }
+
         if (_state.value is State.Finished && loadedRecording != null) {
             _position.value = Duration.ZERO
         }
@@ -110,6 +141,7 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
                     _state.value = State.Finished
                     log.info { "Playback finished" }
                 }.onFailure {
+                    if (it is CancellationException) return@onFailure
                     stopPositionTracking(updatePosition = true)
                     log.error(it) { "Playback failed: ${it.message}" }
                     _state.value = State.Error(it)
@@ -121,8 +153,52 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
         }
     }
 
+    final override suspend fun load(encodedAudio: EncodedAudio) {
+        log.info { "load(encodedAudio): format=${encodedAudio.fileFormat.extension}, size=${encodedAudio.sizeInBytes}" }
+        stopCurrentPlayback()
+        val loadedDuration = runCatching { loadEncodedAudio(encodedAudio) }
+            .getOrElse {
+                _state.value = State.Error(it)
+                throw it
+            }
+        loadedRecording = null
+        _audioFlow.value = null
+        _encodedAudio.value = encodedAudio
+        _position.value = Duration.ZERO
+        _duration.value = loadedDuration
+        _canSeek.value = true
+        _state.value = State.Ready
+    }
+
     final override suspend fun seekTo(position: Duration) {
         log.info { "seekTo($position)" }
+        val encodedAudio = _encodedAudio.value
+        if (encodedAudio != null) {
+            val targetPosition = normalizedEncodedSeekPosition(position)
+            val wasPlaying = _state.value is State.Playing
+            val wasPaused = _state.value is State.Paused
+
+            if (wasPlaying || wasPaused) {
+                stopCurrentPlayback()
+            }
+
+            _position.value = targetPosition
+            seekLoadedEncodedAudio(targetPosition)
+            val duration = _duration.value
+
+            if (wasPlaying && (duration == null || targetPosition < duration)) {
+                _state.value = State.Ready
+                play()
+            } else {
+                _state.value = when {
+                    duration != null && targetPosition >= duration -> State.Finished
+                    wasPaused -> State.Paused
+                    else -> State.Ready
+                }
+            }
+            return
+        }
+
         val recording = loadedRecording ?: throw AudioError.SeekUnsupported()
         val targetPosition = recording.normalizedSeekPosition(position)
         val wasPlaying = _state.value is State.Playing
@@ -178,6 +254,18 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
         }
     }
 
+    final override fun release() {
+        log.info { "release()" }
+        stop()
+        releaseLoadedEncodedIfIdle()
+        loadedRecording = null
+        _audioFlow.value = null
+        _encodedAudio.value = null
+        _duration.value = null
+        _canSeek.value = false
+        _state.value = State.Idle
+    }
+
     protected fun runAndUpdateState(newState: State, block: () -> Unit) {
         _state.value = runCatching {
             block()
@@ -191,6 +279,42 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     private fun playableAudioFlow(): AudioFlow? =
         loadedRecording?.asAudioFlowFrom(_position.value) ?: audioFlow.value
 
+    private suspend fun playEncoded(encodedAudio: EncodedAudio) {
+        if (_state.value is State.Finished) {
+            _position.value = Duration.ZERO
+        }
+        val duration = _duration.value
+        if (duration != null && _position.value >= duration) {
+            _position.value = duration
+            _state.value = State.Finished
+            return
+        }
+        stopCurrentPlayback()
+        val startPosition = _position.value
+        _state.value = State.Playing
+        startPositionTracking(startPosition)
+        playbackJob = scope.launch {
+            runCatching {
+                playEncodedAudioBlocking(encodedAudio, startPosition)
+                stopPositionTracking(updatePosition = true)
+                _position.value = _duration.value ?: _position.value
+                _state.value = State.Finished
+                log.info { "Encoded playback finished" }
+            }.onFailure {
+                if (it is CancellationException) return@onFailure
+                stopPositionTracking(updatePosition = true)
+                log.error(it) { "Encoded playback failed: ${it.message}" }
+                _state.value = State.Error(it)
+            }
+        }
+    }
+
+    private fun normalizedEncodedSeekPosition(position: Duration): Duration {
+        if (position < Duration.ZERO) throw AudioError.InvalidSeekPosition(position)
+        val duration = _duration.value
+        return if (duration != null && position > duration) duration else position
+    }
+
     private suspend fun stopCurrentPlayback() {
         stopPositionTracking(updatePosition = false)
         val job = playbackJob
@@ -199,6 +323,13 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
                 .onFailure { log.error(it) { "Failed to stop current playback: ${it.message}" } }
             job.cancelAndJoin()
             playbackJob = null
+        }
+    }
+
+    private fun releaseLoadedEncodedIfIdle() {
+        if (_encodedAudio.value != null && playbackJob == null) {
+            runCatching { releaseLoadedEncodedAudio() }
+                .onFailure { log.error(it) { "Failed to release encoded playback backend: ${it.message}" } }
         }
     }
 

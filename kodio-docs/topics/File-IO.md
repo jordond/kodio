@@ -14,8 +14,11 @@ Kodio supports reading and writing audio files in common container formats. The 
 | Format | Read | Write | Extensions |
 |--------|------|-------|------------|
 | WAV    | PCM int (8/16/24/32-bit), IEEE float (32/64-bit) | PCM int, IEEE float | `.wav`, `.wave` |
+| AIFF   | PCM int | PCM int | `.aiff`, `.aif` |
+| AU     | PCM int, IEEE float | PCM int, IEEE float | `.au`, `.snd` |
+| MP3    | Direct native playback via `EncodedAudio` | Not supported | `.mp3` |
 
-> More formats (AIFF, FLAC, etc.) are planned. The API is format-agnostic, so your code won't need to change when new formats are added.
+> `AudioRecording.fromBytes()` / `fromFile()` decode file containers into Kodio PCM recordings. MP3 is handled as encoded audio for direct playback instead of PCM recording import.
 >
 {style="tip"}
 
@@ -91,6 +94,37 @@ All three methods accept an optional `AudioFileFormat` parameter (defaults to `W
 // Explicit format
 val recording = AudioRecording.fromBytes(data, AudioFileFormat.Wav)
 ```
+
+## Playing MP3 files {id="mp3"}
+
+MP3 files can be played directly through the platform media decoder without first converting them to a Kodio `AudioRecording`:
+
+```kotlin
+val mp3 = EncodedAudio.fromBytes(
+    bytes = Res.readBytes("files/notification.mp3"),
+    fileFormat = AudioFileFormat.Mp3,
+    fileName = "notification.mp3"
+)
+
+Kodio.play(mp3)
+```
+
+For filesystem-backed targets:
+
+```kotlin
+val mp3 = EncodedAudio.fromFile(Path("song.mp3"))
+Kodio.play(mp3)
+```
+
+For player controls:
+
+```kotlin
+val player = Kodio.player()
+player.load(mp3)
+player.start()
+```
+
+Direct MP3 playback is available on Android, iOS, macOS, JVM desktop, JS, and Wasm JS targets. JVM playback uses JLayer to decode MP3 frames into JavaSound output without exposing the file as a Kodio `AudioRecording`.
 
 ## Error handling {id="errors"}
 

@@ -82,6 +82,18 @@ AudioRecording.fromBytes(format, data)
 AudioRecording.fromChunks(format, chunks)
 ```
 
+## EncodedAudio {id="encoded-audio"}
+
+```kotlin
+val mp3 = EncodedAudio.fromBytes(bytes, AudioFileFormat.Mp3, "song.mp3")
+
+player.load(mp3)
+Kodio.play(mp3)
+```
+
+MP3 playback is direct encoded playback. It is not available through `AudioRecording`
+decode APIs, and Kodio does not encode/export MP3.
+
 ## AudioQuality {id="audio-quality"}
 
 ```kotlin
