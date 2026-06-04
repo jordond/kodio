@@ -19,7 +19,7 @@ recording.play()
 
 ## Playback with controls {id="with-controls"}
 
-When you need to pause, resume, or monitor playback, use `Kodio.play()` with a lambda:
+When you need to pause, resume, seek, or monitor playback, use `Kodio.play()` with a lambda:
 
 ```kotlin
 Kodio.play(recording) { player ->
@@ -32,6 +32,9 @@ Kodio.play(recording) { player ->
     // Resume after 1 second
     delay(1.seconds)
     player.resume()
+
+    // Jump to the halfway point
+    player.seekTo(recording.calculatedDuration / 2)
     
     // Wait for playback to finish
     player.awaitComplete()
@@ -39,6 +42,10 @@ Kodio.play(recording) { player ->
 ```
 
 The lambda receives a `Player` instance that gives you full control over playback.
+
+Seeking is supported for `AudioRecording` sources loaded with `player.load(recording)`.
+Raw streaming `AudioFlow` sources loaded with `player.loadAudioFlow(audioFlow)` are not
+seekable because the stream may not be replayable.
 
 ## Using Player directly {id="player"}
 
@@ -92,6 +99,15 @@ Kodio.play(recording, device = headphones)
 <def title="isFinished: Boolean">
 <code>true</code> after playback has completed.
 </def>
+<def title="canSeek: Boolean">
+<code>true</code> when the loaded source supports <code>seekTo()</code>.
+</def>
+<def title="position: Duration">
+The current playback position.
+</def>
+<def title="duration: Duration?">
+The loaded recording duration, if known.
+</def>
 <def title="stateFlow: StateFlow<State>">
 Observable state changes for reactive UIs.
 </def>
@@ -111,6 +127,9 @@ Pause playback. Use <code>resume()</code> to continue.
 </def>
 <def title="resume()">
 Continue playback after pausing.
+</def>
+<def title="seekTo(position)">
+Jump to a playback position. Works for loaded <code>AudioRecording</code> sources.
 </def>
 <def title="stop()">
 Stop playback and reset to the beginning.

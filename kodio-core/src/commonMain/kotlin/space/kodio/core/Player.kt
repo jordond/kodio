@@ -2,6 +2,7 @@ package space.kodio.core
 
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlin.time.Duration
 
 /**
  * High-level wrapper around [AudioPlaybackSession] providing a simplified API.
@@ -45,6 +46,30 @@ class Player internal constructor(
         get() = session.state
 
     /**
+     * Current playback position.
+     */
+    val position: Duration
+        get() = session.position.value
+
+    /**
+     * Flow of playback position changes for observing progress.
+     */
+    val positionFlow: StateFlow<Duration>
+        get() = session.position
+
+    /**
+     * Total loaded audio duration, if known.
+     */
+    val duration: Duration?
+        get() = session.duration.value
+
+    /**
+     * Whether the loaded audio supports seeking.
+     */
+    val canSeek: Boolean
+        get() = session.canSeek.value
+
+    /**
      * Whether the player is currently playing audio.
      */
     val isPlaying: Boolean
@@ -78,7 +103,7 @@ class Player internal constructor(
      * Loads an [AudioRecording] for playback.
      */
     suspend fun load(recording: AudioRecording) {
-        session.load(recording.asAudioFlow())
+        session.load(recording)
     }
 
     /**
@@ -95,6 +120,16 @@ class Player internal constructor(
      */
     suspend fun start() {
         session.play()
+    }
+
+    /**
+     * Seeks playback to [position].
+     *
+     * Seeking is supported for [AudioRecording] loaded with [load]. Streaming
+     * [AudioFlow] sources loaded with [loadAudioFlow] are not seekable.
+     */
+    suspend fun seekTo(position: Duration) {
+        session.seekTo(position)
     }
 
     /**

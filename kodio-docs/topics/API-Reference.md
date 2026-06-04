@@ -49,6 +49,7 @@ player.load(recording)
 player.start()
 player.pause()
 player.resume()
+player.seekTo(position)
 player.stop()
 player.toggle()
 player.release()
@@ -58,6 +59,9 @@ player.isPlaying
 player.isPaused
 player.isReady
 player.isFinished
+player.canSeek
+player.position
+player.duration
 
 player.use { p -> ... }
 ```
@@ -97,6 +101,8 @@ AudioError.DeviceError
 AudioError.NotInitialized
 AudioError.AlreadyRecording
 AudioError.AlreadyPlaying
+AudioError.SeekUnsupported
+AudioError.InvalidSeekPosition
 AudioError.NoRecordingData
 AudioError.Unknown
 ```

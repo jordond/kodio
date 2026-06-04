@@ -21,6 +21,9 @@ import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
 private val logger = namedLogger("NativeMacosAudio")
 
@@ -381,14 +384,50 @@ private class NativeMacosAudioPlaybackSession(
     private val _audioFlowHolder = MutableStateFlow<AudioFlow?>(null)
     override val audioFlow: StateFlow<AudioFlow?> = _audioFlowHolder.asStateFlow()
 
+    private val _position = MutableStateFlow(Duration.ZERO)
+    override val position: StateFlow<Duration> = _position.asStateFlow()
+
+    private val _duration = MutableStateFlow<Duration?>(null)
+    override val duration: StateFlow<Duration?> = _duration.asStateFlow()
+
+    private val _canSeek = MutableStateFlow(false)
+    override val canSeek: StateFlow<Boolean> = _canSeek.asStateFlow()
+
     private var runtimeArena: Arena? = null
     private var loaded = false
+    private var loadedRecording: AudioRecording? = null
+    private var resumeShouldPlayFromSeek = false
     private var completionJob: Job? = null
+    private var positionJob: Job? = null
+    private var positionStartedAt: TimeSource.Monotonic.ValueTimeMark? = null
+    private var positionAtStart: Duration = Duration.ZERO
     private val completionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override suspend fun load(audioFlow: AudioFlow) {
+        stopPositionTracking(updatePosition = false)
+        completionJob?.cancel()
         _audioFlowHolder.value = audioFlow
+        loadedRecording = null
+        resumeShouldPlayFromSeek = false
+        _position.value = Duration.ZERO
+        _duration.value = null
+        _canSeek.value = false
+        loadNative(audioFlow)
+    }
 
+    override suspend fun load(recording: AudioRecording) {
+        stopPositionTracking(updatePosition = false)
+        completionJob?.cancel()
+        loadedRecording = recording
+        resumeShouldPlayFromSeek = false
+        _audioFlowHolder.value = recording.asAudioFlow()
+        _position.value = Duration.ZERO
+        _duration.value = recording.calculatedDuration
+        _canSeek.value = true
+        loadNative(recording.asAudioFlow())
+    }
+
+    private suspend fun loadNative(audioFlow: AudioFlow) {
         closePreviousArena()
         val arena = Arena.ofShared().also { runtimeArena = it }
 
@@ -438,7 +477,20 @@ private class NativeMacosAudioPlaybackSession(
     override suspend fun play() {
         if (!loaded) return
 
+        val duration = _duration.value
+        if (duration != null && _position.value >= duration) {
+            val recording = loadedRecording ?: run {
+                _position.value = duration
+                _state.value = AudioPlaybackSession.State.Finished
+                return
+            }
+            _position.value = Duration.ZERO
+            loadNative(recording.asAudioFlow())
+        }
+
+        val startPosition = _position.value
         _state.value = AudioPlaybackSession.State.Playing
+        startPositionTracking(startPosition)
 
         NativeMacosLib.macos_playback_session_play.invokeExact(nativeMemSeq)
 
@@ -447,28 +499,103 @@ private class NativeMacosAudioPlaybackSession(
                 .invokeExact(nativeMemSeq) as Int
             ensureActive()
             _state.value = when (result) {
-                0 -> AudioPlaybackSession.State.Finished
-                1 -> AudioPlaybackSession.State.Error(RuntimeException("Native playback error"))
-                else -> AudioPlaybackSession.State.Idle
+                0 -> {
+                    stopPositionTracking(updatePosition = true)
+                    _position.value = _duration.value ?: _position.value
+                    AudioPlaybackSession.State.Finished
+                }
+                1 -> {
+                    stopPositionTracking(updatePosition = true)
+                    AudioPlaybackSession.State.Error(RuntimeException("Native playback error"))
+                }
+                else -> {
+                    stopPositionTracking(updatePosition = false)
+                    AudioPlaybackSession.State.Idle
+                }
             }
         }
     }
 
+    override suspend fun seekTo(position: Duration) {
+        val recording = loadedRecording ?: throw AudioError.SeekUnsupported()
+        val targetPosition = recording.normalizedSeekPosition(position)
+        val wasPlaying = _state.value is AudioPlaybackSession.State.Playing
+        val wasPaused = _state.value is AudioPlaybackSession.State.Paused
+
+        if (_state.value is AudioPlaybackSession.State.Playing || _state.value is AudioPlaybackSession.State.Paused) {
+            stopPositionTracking(updatePosition = false)
+            completionJob?.cancel()
+            NativeMacosLib.macos_playback_session_stop.invokeExact(nativeMemSeq)
+        }
+
+        _position.value = targetPosition
+        loadNative(recording.asAudioFlowFrom(targetPosition))
+
+        val duration = _duration.value
+        if (duration != null && targetPosition >= duration) {
+            _state.value = AudioPlaybackSession.State.Finished
+            return
+        }
+
+        if (wasPlaying) play()
+        if (wasPaused) {
+            resumeShouldPlayFromSeek = true
+            _state.value = AudioPlaybackSession.State.Paused
+        }
+    }
+
     override fun pause() {
+        if (_state.value !is AudioPlaybackSession.State.Playing) return
+        stopPositionTracking(updatePosition = true)
         NativeMacosLib.macos_playback_session_pause.invokeExact(nativeMemSeq)
         _state.value = AudioPlaybackSession.State.Paused
     }
 
     override fun resume() {
+        if (_state.value !is AudioPlaybackSession.State.Paused) return
+        if (resumeShouldPlayFromSeek) {
+            resumeShouldPlayFromSeek = false
+            completionScope.launch { play() }
+            return
+        }
         NativeMacosLib.macos_playback_session_resume.invokeExact(nativeMemSeq)
         _state.value = AudioPlaybackSession.State.Playing
+        startPositionTracking(_position.value)
     }
 
     override fun stop() {
+        stopPositionTracking(updatePosition = false)
         completionJob?.cancel()
-        NativeMacosLib.macos_playback_session_stop.invokeExact(nativeMemSeq)
+        if (loaded) NativeMacosLib.macos_playback_session_stop.invokeExact(nativeMemSeq)
+        resumeShouldPlayFromSeek = false
+        _position.value = Duration.ZERO
         _state.value = AudioPlaybackSession.State.Idle
-        loaded = false
+    }
+
+    private fun startPositionTracking(startPosition: Duration) {
+        stopPositionTracking(updatePosition = false)
+        positionAtStart = startPosition
+        positionStartedAt = TimeSource.Monotonic.markNow()
+        positionJob = completionScope.launch {
+            while (true) {
+                updatePositionFromClock()
+                delay(50.milliseconds)
+            }
+        }
+    }
+
+    private fun stopPositionTracking(updatePosition: Boolean) {
+        if (updatePosition) updatePositionFromClock()
+        positionJob?.cancel()
+        positionJob = null
+        positionStartedAt = null
+    }
+
+    private fun updatePositionFromClock() {
+        val startedAt = positionStartedAt ?: return
+        val current = positionAtStart + startedAt.elapsedNow()
+        val duration = _duration.value
+        _position.value = if (duration != null && current > duration) duration else current
     }
 
     private fun closePreviousArena() {
