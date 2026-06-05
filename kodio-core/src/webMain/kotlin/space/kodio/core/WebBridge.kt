@@ -45,6 +45,7 @@ internal expect fun encodedAudioElementReadyState(element: JsAny): Int
 internal expect fun encodedAudioElementDuration(element: JsAny): Double
 internal expect fun encodedAudioElementEnded(element: JsAny): Boolean
 internal expect fun encodedAudioElementSetCurrentTime(element: JsAny, seconds: Double)
+internal expect fun encodedAudioElementSetPlaybackRate(element: JsAny, speed: Float)
 internal expect fun encodedAudioElementPlay(element: JsAny)
 internal expect fun encodedAudioElementPlayError(element: JsAny): String?
 internal expect fun encodedAudioElementPause(element: JsAny)

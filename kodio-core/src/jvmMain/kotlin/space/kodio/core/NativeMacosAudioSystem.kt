@@ -399,6 +399,9 @@ private class NativeMacosAudioPlaybackSession(
     private val _canSeek = MutableStateFlow(false)
     override val canSeek: StateFlow<Boolean> = _canSeek.asStateFlow()
 
+    private val _playbackSpeed = MutableStateFlow(AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED)
+    override val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
     private var runtimeArena: Arena? = null
     private var loaded = false
     private var loadedRecording: AudioRecording? = null
@@ -446,6 +449,7 @@ private class NativeMacosAudioPlaybackSession(
                 _state.value = AudioPlaybackSession.State.Error(it)
                 throw it
             }
+        mp3Backend.setPlaybackSpeed(_playbackSpeed.value)
         loaded = false
         loadedRecording = null
         resumeShouldPlayFromSeek = false
@@ -479,6 +483,7 @@ private class NativeMacosAudioPlaybackSession(
             audioData.size,
             audioDataSeq
         )
+        NativeMacosLib.macos_playback_session_set_playback_speed.invokeExact(nativeMemSeq, _playbackSpeed.value)
 
         loaded = true
         _state.value = AudioPlaybackSession.State.Ready
@@ -607,6 +612,25 @@ private class NativeMacosAudioPlaybackSession(
         }
     }
 
+    override fun setPlaybackSpeed(speed: Float) {
+        validatePlaybackSpeed(speed)
+        if (_playbackSpeed.value == speed) return
+
+        val wasPlaying = _state.value is AudioPlaybackSession.State.Playing
+        if (wasPlaying) stopPositionTracking(updatePosition = true)
+
+        _playbackSpeed.value = speed
+        if (_encodedAudio.value != null) {
+            mp3Backend.setPlaybackSpeed(speed)
+        } else if (loaded) {
+            NativeMacosLib.macos_playback_session_set_playback_speed.invokeExact(nativeMemSeq, speed)
+        }
+
+        if (wasPlaying && _state.value is AudioPlaybackSession.State.Playing) {
+            startPositionTracking(_position.value)
+        }
+    }
+
     override fun pause() {
         if (_state.value !is AudioPlaybackSession.State.Playing) return
         stopPositionTracking(updatePosition = true)
@@ -722,9 +746,18 @@ private class NativeMacosAudioPlaybackSession(
 
     private fun updatePositionFromClock() {
         val startedAt = positionStartedAt ?: return
-        val current = positionAtStart + startedAt.elapsedNow()
+        val current = positionAtStart + startedAt.elapsedNow() * _playbackSpeed.value.toDouble()
         val duration = _duration.value
         _position.value = if (duration != null && current > duration) duration else current
+    }
+
+    private fun validatePlaybackSpeed(speed: Float) {
+        if (!speed.isFinite() ||
+            speed < AudioPlaybackSession.MIN_PLAYBACK_SPEED ||
+            speed > AudioPlaybackSession.MAX_PLAYBACK_SPEED
+        ) {
+            throw AudioError.InvalidPlaybackSpeed(speed)
+        }
     }
 
     private fun closePreviousArena() {
@@ -771,6 +804,7 @@ private object NativeMacosLib {
     val macos_playback_session_await_completion: MethodHandle
     val macos_playback_session_pause: MethodHandle
     val macos_playback_session_resume: MethodHandle
+    val macos_playback_session_set_playback_speed: MethodHandle
     val macos_playback_session_stop: MethodHandle
     val macos_playback_session_release: MethodHandle
 
@@ -879,6 +913,11 @@ private object NativeMacosLib {
         macos_playback_session_resume = lookupMethodVoid(
             name = "macos_playback_session_resume",
             ValueLayout.ADDRESS
+        )
+        macos_playback_session_set_playback_speed = lookupMethodVoid(
+            name = "macos_playback_session_set_playback_speed",
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_FLOAT
         )
         macos_playback_session_stop = lookupMethodVoid(
             name = "macos_playback_session_stop",

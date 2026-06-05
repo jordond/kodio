@@ -131,6 +131,10 @@ internal actual fun encodedAudioElementSetCurrentTime(element: JsAny, seconds: D
     js("element.currentTime = seconds;")
 }
 
+internal actual fun encodedAudioElementSetPlaybackRate(element: JsAny, speed: Float) {
+    js("element.playbackRate = speed;")
+}
+
 internal actual fun encodedAudioElementPlay(element: JsAny) {
     js(
         """

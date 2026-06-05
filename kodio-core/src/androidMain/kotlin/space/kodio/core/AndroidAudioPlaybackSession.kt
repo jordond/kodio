@@ -6,6 +6,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaDataSource
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import android.media.AudioRecord
 import android.media.AudioTrack
 import kotlinx.coroutines.CompletableDeferred
@@ -69,6 +70,7 @@ internal class AndroidAudioPlaybackSession(
         // Keep old behavior: align playback rate to stream sample rate
         // (For modern apps, PlaybackParams is preferred; this preserves your logic.)
         track.playbackRate = format.sampleRate
+        track.playbackParams = playbackParamsFor(playbackSpeed.value)
         track.setVolume(AudioTrack.getMaxVolume())
 
         this.audioTrack = track
@@ -121,6 +123,7 @@ internal class AndroidAudioPlaybackSession(
         if (requestedDevice != null) setPreferredDevice(context, requestedDevice, player)
         releaseLoadedEncodedAudio()
         mediaPlayer = player
+        applyPlaybackSpeedToMediaPlayer(player, playbackSpeed.value)
         return player.duration.milliseconds
     }
 
@@ -135,6 +138,11 @@ internal class AndroidAudioPlaybackSession(
         player.seekTo(startPosition.inWholeMilliseconds.toInt())
         player.start()
         finished.await()
+    }
+
+    override fun onPlaybackSpeedChanged(speed: Float) {
+        audioTrack?.playbackParams = playbackParamsFor(speed)
+        mediaPlayer?.let { applyPlaybackSpeedToMediaPlayer(it, speed) }
     }
 
     override fun onPause() {
@@ -163,6 +171,15 @@ internal class AndroidAudioPlaybackSession(
         mediaPlayer?.release()
         mediaPlayer = null
     }
+}
+
+private fun playbackParamsFor(speed: Float): PlaybackParams =
+    PlaybackParams()
+        .setSpeed(speed)
+        .setPitch(1.0f)
+
+private fun applyPlaybackSpeedToMediaPlayer(player: MediaPlayer, speed: Float) {
+    player.playbackParams = playbackParamsFor(speed)
 }
 
 /* -------------------- Helpers used above -------------------- */

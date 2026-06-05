@@ -29,6 +29,7 @@ class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
 
     private var audioContext: AudioContext? = null
     private var encodedElement: JsAny? = null
+    private val activeSources = mutableSetOf<AudioBufferSourceNode>()
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
         val contextOptions = createAudioContextOptions(
@@ -82,17 +83,20 @@ class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
             // 3. Create a source and play it
             val source = context.createBufferSource()
             source.buffer = audioBuffer
+            source.playbackRate.value = playbackSpeed.value
             source.onended = EventHandler {
+                activeSources -= source
                 jsAudioBufferFinishedIndicator.complete(Unit)
             }
             source.connect(context.destination)
+            activeSources += source
 
             // Schedule playback. Wait if the context time hasn't caught up yet.
             val scheduleTime = if (nextStartTime < context.currentTime) context.currentTime else nextStartTime
             source.start(scheduleTime)
 
             // Update the start time for the next buffer
-            nextStartTime = scheduleTime + audioBuffer.duration
+            nextStartTime = scheduleTime + audioBuffer.duration / playbackSpeed.value.toDouble()
 
             jsAudioBufferFinishedIndicator
         }.lastOrNull()
@@ -120,6 +124,7 @@ class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
         val duration = encodedAudioElementDuration(element)
         releaseLoadedEncodedAudio()
         encodedElement = element
+        encodedAudioElementSetPlaybackRate(element, playbackSpeed.value)
         return if (duration.isFinite() && duration >= 0.0) duration.seconds else null
     }
 
@@ -142,6 +147,11 @@ class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
         }
     }
 
+    override fun onPlaybackSpeedChanged(speed: Float) {
+        activeSources.forEach { it.playbackRate.value = speed }
+        encodedElement?.let { encodedAudioElementSetPlaybackRate(it, speed) }
+    }
+
     override fun onPause() {
         encodedElement?.let(::encodedAudioElementPause)
         scope.launch { audioContext?.suspend() }
@@ -159,6 +169,7 @@ class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
         }
         val context = audioContext?:return
         audioContext = null
+        activeSources.clear()
         scope.launch { context.close() }
     }
 

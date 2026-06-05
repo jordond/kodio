@@ -412,6 +412,7 @@ private fun EncodedPlaybackCard(encodedAudio: EncodedAudio, device: AudioDevice.
     var position by remember { mutableStateOf(Duration.ZERO) }
     var duration by remember { mutableStateOf<Duration?>(null) }
     var canSeek by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableStateOf(AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED) }
 
     LaunchedEffect(encodedAudio, device) {
         val p = Kodio.player(device)
@@ -421,15 +422,20 @@ private fun EncodedPlaybackCard(encodedAudio: EncodedAudio, device: AudioDevice.
             position = p.position
             duration = p.duration
             canSeek = p.canSeek
+            playbackSpeed = p.playbackSpeed
 
             val positionJob = launch {
                 p.positionFlow.collect { position = it }
+            }
+            val speedJob = launch {
+                p.playbackSpeedFlow.collect { playbackSpeed = it }
             }
 
             try {
                 p.stateFlow.collect { playbackState = it }
             } finally {
                 positionJob.cancel()
+                speedJob.cancel()
             }
         } finally {
             p.release()
@@ -503,6 +509,13 @@ private fun EncodedPlaybackCard(encodedAudio: EncodedAudio, device: AudioDevice.
                 canSeek = canSeek,
                 onSeek = { target ->
                     scope.launch { player?.seekTo(target) }
+                }
+            )
+
+            PlaybackSpeedControls(
+                playbackSpeed = playbackSpeed,
+                onSpeedChange = { speed ->
+                    player?.setPlaybackSpeed(speed)
                 }
             )
 
@@ -588,6 +601,11 @@ private fun PlaybackCard(recording: AudioRecording, device: AudioDevice.Output? 
                 onSeek = playerState::seekTo
             )
 
+            PlaybackSpeedControls(
+                playbackSpeed = playerState.playbackSpeed,
+                onSpeedChange = playerState::setPlaybackSpeed
+            )
+
             playerState.error?.let { err ->
                 Text(
                     text = err.message ?: "Playback error",
@@ -595,6 +613,28 @@ private fun PlaybackCard(recording: AudioRecording, device: AudioDevice.Output? 
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackSpeedControls(
+    playbackSpeed: Float,
+    onSpeedChange: (Float) -> Unit,
+) {
+    val speeds = listOf(0.5f, 1.0f, 1.5f, 2.0f)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        speeds.forEach { speed ->
+            FilterChip(
+                selected = playbackSpeed == speed,
+                onClick = { onSpeedChange(speed) },
+                label = { Text("${speed}x") }
+            )
         }
     }
 }

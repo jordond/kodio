@@ -67,8 +67,10 @@ class PlayerState internal constructor(
     private var _position = mutableStateOf(Duration.ZERO)
     private var _duration = mutableStateOf<Duration?>(null)
     private var _canSeek = mutableStateOf(false)
+    private var _playbackSpeed = mutableFloatStateOf(AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED)
     private var stateObserverJob: Job? = null
     private var positionObserverJob: Job? = null
+    private var speedObserverJob: Job? = null
     
     // Mutex for thread-safe state transitions
     private val stateMutex = Mutex()
@@ -119,6 +121,11 @@ class PlayerState internal constructor(
     val canSeek: Boolean by _canSeek
 
     /**
+     * Current playback speed multiplier.
+     */
+    val playbackSpeed: Float by _playbackSpeed
+
+    /**
      * Whether there is an error.
      */
     val hasError: Boolean
@@ -167,6 +174,7 @@ class PlayerState internal constructor(
                 _position.value = player.position
                 _duration.value = player.duration
                 _canSeek.value = player.canSeek
+                _playbackSpeed.floatValue = player.playbackSpeed
                 _isReady.value = true
                 _isPlaying.value = false
                 _isPaused.value = false
@@ -175,6 +183,7 @@ class PlayerState internal constructor(
             
             observePlayerState(player)
             observePlayerPosition(player)
+            observePlayerSpeed(player)
         } catch (e: Exception) {
             stateMutex.withLock {
                 _error.value = AudioError.from(e)
@@ -253,6 +262,18 @@ class PlayerState internal constructor(
     }
 
     /**
+     * Sets playback speed to [speed].
+     */
+    fun setPlaybackSpeed(speed: Float) {
+        try {
+            _player?.setPlaybackSpeed(speed)
+            _playbackSpeed.floatValue = _player?.playbackSpeed ?: speed
+        } catch (e: Exception) {
+            _error.value = AudioError.from(e)
+        }
+    }
+
+    /**
      * Toggles between playing and paused states.
      */
     fun toggle() {
@@ -310,12 +331,15 @@ class PlayerState internal constructor(
             stateObserverJob = null
             positionObserverJob?.cancel()
             positionObserverJob = null
+            speedObserverJob?.cancel()
+            speedObserverJob = null
             _player?.release()
             _player = null
             _loadedRecording.value = null
             _position.value = Duration.ZERO
             _duration.value = null
             _canSeek.value = false
+            _playbackSpeed.floatValue = AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED
             _isReady.value = false
             _isPlaying.value = false
             _isPaused.value = false
@@ -333,6 +357,8 @@ class PlayerState internal constructor(
         stateObserverJob = null
         positionObserverJob?.cancel()
         positionObserverJob = null
+        speedObserverJob?.cancel()
+        speedObserverJob = null
         _player?.release()
         _player = null
     }
@@ -389,6 +415,15 @@ class PlayerState internal constructor(
         positionObserverJob = scope.launch {
             player.positionFlow.collectLatest { position ->
                 _position.value = position
+            }
+        }
+    }
+
+    private fun observePlayerSpeed(player: Player) {
+        speedObserverJob?.cancel()
+        speedObserverJob = scope.launch {
+            player.playbackSpeedFlow.collectLatest { speed ->
+                _playbackSpeed.floatValue = speed
             }
         }
     }

@@ -53,6 +53,7 @@ class MacosAudioPlaybackSession(
             bufferCount = bufferCount,
             bufferDurationSec = bufferDurationSec
         )
+        audioQueue.setPlaybackRate(playbackSpeed.value)
         logger.debug { "AudioQueue created successfully" }
         
         if (requestedDevice != null) {
@@ -156,6 +157,8 @@ class MacosAudioPlaybackSession(
             runCatching { SystemFileSystem.delete(path, mustExist = false) }
             throw AudioFileReadError.InvalidFile("Unable to prepare MP3 data for playback.")
         }
+        player.enableRate = true
+        player.rate = playbackSpeed.value
         releaseLoadedEncodedAudio()
         encodedPlayer = player
         encodedTempPath = path
@@ -175,6 +178,16 @@ class MacosAudioPlaybackSession(
 
     override fun seekLoadedEncodedAudio(position: Duration) {
         encodedPlayer?.currentTime = position.inWholeMilliseconds / 1000.0
+    }
+
+    override fun onPlaybackSpeedChanged(speed: Float) {
+        encodedPlayer?.let {
+            it.enableRate = true
+            it.rate = speed
+        }
+        if (::audioQueue.isInitialized) {
+            audioQueue.setPlaybackRate(speed)
+        }
     }
 
     override fun onPause() {

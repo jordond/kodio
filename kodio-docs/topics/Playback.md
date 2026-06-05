@@ -7,7 +7,7 @@
 <p><b>Play audio</b> with <code>recording.play()</code> for simple playback or <code>Kodio.player()</code> for full control.</p>
 </tldr>
 
-Kodio provides flexible audio playback APIs, from a simple one-liner to a full-featured `Player` class with pause, resume, and device selection.
+Kodio provides flexible audio playback APIs, from a simple one-liner to a full-featured `Player` class with pause, resume, seek, playback speed, and device selection.
 
 ## Simple playback {id="simple"}
 
@@ -42,6 +42,9 @@ Kodio.play(recording) { player ->
 
     // Jump to the halfway point
     player.seekTo(recording.calculatedDuration / 2)
+
+    // Play at 1.5x speed
+    player.setPlaybackSpeed(1.5f)
     
     // Wait for playback to finish
     player.awaitComplete()
@@ -53,6 +56,10 @@ The lambda receives a `Player` instance that gives you full control over playbac
 Seeking is supported for `AudioRecording` sources loaded with `player.load(recording)`.
 Raw streaming `AudioFlow` sources loaded with `player.loadAudioFlow(audioFlow)` are not
 seekable because the stream may not be replayable.
+
+Playback speed is controlled with `player.setPlaybackSpeed(speed)`. Supported
+values are `0.25f` through `4.0f`; `player.playbackSpeed` and
+`player.playbackSpeedFlow` expose the current speed for UI state.
 
 MP3 sources loaded with `player.load(encodedAudio)` use the platform media decoder
 directly instead of converting the file into an `AudioRecording`. JVM desktop
@@ -119,6 +126,9 @@ The current playback position.
 <def title="duration: Duration?">
 The loaded recording duration, if known.
 </def>
+<def title="playbackSpeed: Float">
+The current playback speed multiplier.
+</def>
 <def title="stateFlow: StateFlow<State>">
 Observable state changes for reactive UIs.
 </def>
@@ -144,6 +154,9 @@ Continue playback after pausing.
 </def>
 <def title="seekTo(position)">
 Jump to a playback position. Works for loaded <code>AudioRecording</code> sources.
+</def>
+<def title="setPlaybackSpeed(speed)">
+Set the playback speed multiplier from <code>0.25f</code> through <code>4.0f</code>.
 </def>
 <def title="stop()">
 Stop playback and reset to the beginning.

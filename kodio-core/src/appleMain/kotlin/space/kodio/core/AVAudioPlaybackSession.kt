@@ -17,6 +17,7 @@ import platform.AVFAudio.AVAudioFormat
 import platform.AVFAudio.AVAudioPCMFormatFloat32
 import platform.AVFAudio.AVAudioPlayer
 import platform.AVFAudio.AVAudioPlayerNode
+import platform.AVFAudio.AVAudioUnitVarispeed
 import platform.Foundation.NSURL
 import space.kodio.core.io.files.AudioFileFormat
 import space.kodio.core.io.files.AudioFileReadError
@@ -34,6 +35,7 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
     
     private val engine = AVAudioEngine()
     private val player = AVAudioPlayerNode()
+    private val varispeed = AVAudioUnitVarispeed()
     private lateinit var standardAVFormat: AVAudioFormat
     private lateinit var interleavedAVFormat: AVAudioFormat
     private var deinterleaveConverter: AVAudioConverter? = null
@@ -42,6 +44,7 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
 
     init {
         engine.attachNode(player)
+        engine.attachNode(varispeed)
         log.info { "Attached player node to engine" }
     }
 
@@ -96,8 +99,10 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
                 "channels=${mainMixerOutputFormat.channelCount}, commonFormat=${mainMixerOutputFormat.commonFormat}"
         }
 
-        log.info { "Connecting player -> mainMixerNode with standard avFormat" }
-        engine.connect(player, engine.mainMixerNode, standardAVFormat)
+        log.info { "Connecting player -> varispeed -> mainMixerNode with standard avFormat" }
+        engine.connect(player, varispeed, standardAVFormat)
+        engine.connect(varispeed, engine.mainMixerNode, standardAVFormat)
+        varispeed.rate = playbackSpeed.value
 
         log.info { "Configuring audio session" }
         configureAudioSession()
@@ -179,6 +184,8 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
             runCatching { SystemFileSystem.delete(path, mustExist = false) }
             throw AudioFileReadError.InvalidFile("Unable to prepare MP3 data for playback.")
         }
+        player.enableRate = true
+        player.rate = playbackSpeed.value
         releaseLoadedEncodedAudio()
         encodedPlayer = player
         encodedTempPath = path
@@ -198,6 +205,14 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
 
     override fun seekLoadedEncodedAudio(position: Duration) {
         encodedPlayer?.currentTime = position.inWholeMilliseconds / 1000.0
+    }
+
+    override fun onPlaybackSpeedChanged(speed: Float) {
+        varispeed.rate = speed
+        encodedPlayer?.let {
+            it.enableRate = true
+            it.rate = speed
+        }
     }
 
     override fun onPause() {
@@ -223,6 +238,7 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
             player.stop()
         engine.stop()
         engine.disconnectNodeOutput(player)
+        engine.disconnectNodeOutput(varispeed)
         log.info { "Engine stopped and nodes disconnected" }
     }
 
