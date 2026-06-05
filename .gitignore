@@ -15,3 +15,4 @@ xcuserdata
 hs_err_pid*.log
 kodio-core/test.wav
 kodio-core/scripts/
+.env
