@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import space.kodio.core.io.files.EncodedAudio
 import javax.sound.sampled.SourceDataLine
+import kotlin.math.roundToInt
 import kotlin.time.Duration
 
 /**
@@ -16,6 +17,8 @@ class JvmAudioPlaybackSession(private val device: AudioDevice.Output) : BaseAudi
     private val isPaused = MutableStateFlow(false)
 
     private var dataLine: SourceDataLine? = null
+    private lateinit var preparedPlaybackFormat: AudioFormat
+    private var appliedLineSpeed: Float? = null
     private val mp3Backend = JvmMp3PlaybackBackend(device)
 
     override suspend fun preparePlayback(format: AudioFormat): AudioFormat {
@@ -23,22 +26,48 @@ class JvmAudioPlaybackSession(private val device: AudioDevice.Output) : BaseAudi
         val playbackFormat = format
             .takeIf { mixer.isSupported<SourceDataLine>(it) }
             ?: device.formatSupport.defaultFormat
-        val line = mixer.getLine<SourceDataLine>(playbackFormat)
-        line.open(playbackFormat)
-        line.start()
-        this.dataLine = line
+        preparedPlaybackFormat = playbackFormat
+        openLineForSpeed(playbackFormat, playbackSpeed.value).close()
+        appliedLineSpeed = null
         return playbackFormat
     }
 
+    private fun openLineForSpeed(format: AudioFormat, speed: Float): SourceDataLine {
+        val mixer = getMixer(device)
+        val requestedFormat = format.copy(
+            sampleRate = (format.sampleRate * speed).roundToInt().coerceAtLeast(1)
+        )
+        val playbackFormat = requestedFormat
+            .takeIf { mixer.isSupported<SourceDataLine>(it) }
+            ?: format
+        val line = mixer.getLine<SourceDataLine>(playbackFormat)
+        line.open(playbackFormat)
+        line.start()
+        return line
+    }
+
     override suspend fun playBlocking(audioFlow: AudioFlow) {
-        val line = dataLine ?: return
         audioFlow.collect { buffer ->
             isPaused.first { !it } // blocks until false
+            val speed = playbackSpeed.value
+            val line = if (dataLine == null || appliedLineSpeed != speed) {
+                dataLine?.drain()
+                dataLine?.stop()
+                dataLine?.close()
+                openLineForSpeed(preparedPlaybackFormat, speed).also {
+                    dataLine = it
+                    appliedLineSpeed = speed
+                }
+            } else {
+                dataLine ?: return@collect
+            }
             line.write(buffer, 0, buffer.size)
         }
-        line.drain()
-        line.stop()
-        line.close()
+        dataLine?.drain()
+        dataLine?.stop()
+        dataLine?.close()
+        dataLine = null
+        appliedLineSpeed = null
     }
 
     override suspend fun loadEncodedAudio(encodedAudio: EncodedAudio): Duration? =
@@ -49,6 +78,10 @@ class JvmAudioPlaybackSession(private val device: AudioDevice.Output) : BaseAudi
     }
 
     override fun seekLoadedEncodedAudio(position: Duration) = Unit
+
+    override fun onPlaybackSpeedChanged(speed: Float) {
+        mp3Backend.setPlaybackSpeed(speed)
+    }
 
     override fun onPause() {
         mp3Backend.pause()
@@ -69,6 +102,7 @@ class JvmAudioPlaybackSession(private val device: AudioDevice.Output) : BaseAudi
         dataLine?.flush()
         dataLine?.close()
         dataLine = null
+        appliedLineSpeed = null
     }
 
     override fun releaseLoadedEncodedAudio() {

@@ -48,6 +48,9 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     private val _canSeek = MutableStateFlow(false)
     override val canSeek: StateFlow<Boolean> = _canSeek.asStateFlow()
 
+    private val _playbackSpeed = MutableStateFlow(AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED)
+    override val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
     private var loadedRecording: AudioRecording? = null
 
     protected val scope = CoroutineScope(Dispatchers.Default) + SupervisorJob()
@@ -68,6 +71,8 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     }
 
     protected open fun seekLoadedEncodedAudio(position: Duration) = Unit
+
+    protected open fun onPlaybackSpeedChanged(speed: Float) = Unit
 
     protected open fun releaseLoadedEncodedAudio() = onStop()
 
@@ -138,11 +143,13 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
                     playBlocking(playbackAudioFlow)
                     stopPositionTracking(updatePosition = true)
                     _position.value = _duration.value ?: _position.value
+                    playbackJob = null
                     _state.value = State.Finished
                     log.info { "Playback finished" }
                 }.onFailure {
                     if (it is CancellationException) return@onFailure
                     stopPositionTracking(updatePosition = true)
+                    playbackJob = null
                     log.error(it) { "Playback failed: ${it.message}" }
                     _state.value = State.Error(it)
                 }
@@ -223,6 +230,27 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
         }
     }
 
+    final override fun setPlaybackSpeed(speed: Float) {
+        validatePlaybackSpeed(speed)
+        if (_playbackSpeed.value == speed) return
+
+        val wasPlaying = _state.value is State.Playing
+        if (wasPlaying) {
+            stopPositionTracking(updatePosition = true)
+        }
+
+        _playbackSpeed.value = speed
+        runCatching { onPlaybackSpeedChanged(speed) }
+            .onFailure {
+                log.error(it) { "Failed to set playback speed to $speed: ${it.message}" }
+                _state.value = State.Error(it)
+            }
+
+        if (wasPlaying && _state.value is State.Playing) {
+            startPositionTracking(_position.value)
+        }
+    }
+
     final override fun pause() {
         log.info { "pause()" }
         if (_state.value !is State.Playing) return
@@ -298,11 +326,13 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
                 playEncodedAudioBlocking(encodedAudio, startPosition)
                 stopPositionTracking(updatePosition = true)
                 _position.value = _duration.value ?: _position.value
+                playbackJob = null
                 _state.value = State.Finished
                 log.info { "Encoded playback finished" }
             }.onFailure {
                 if (it is CancellationException) return@onFailure
                 stopPositionTracking(updatePosition = true)
+                playbackJob = null
                 log.error(it) { "Encoded playback failed: ${it.message}" }
                 _state.value = State.Error(it)
             }
@@ -335,12 +365,13 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
 
     private fun startPositionTracking(startPosition: Duration) {
         stopPositionTracking(updatePosition = false)
+        _position.value = startPosition
         positionAtStart = startPosition
         positionStartedAt = TimeSource.Monotonic.markNow()
         positionJob = scope.launch {
             while (true) {
-                updatePositionFromClock()
                 delay(50.milliseconds)
+                updatePositionFromClock()
             }
         }
     }
@@ -354,9 +385,17 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
 
     private fun updatePositionFromClock() {
         val startedAt = positionStartedAt ?: return
-        val current = positionAtStart + startedAt.elapsedNow()
+        val current = positionAtStart + startedAt.elapsedNow() * _playbackSpeed.value.toDouble()
         val duration = _duration.value
         _position.value = if (duration != null && current > duration) duration else current
     }
 
+    private fun validatePlaybackSpeed(speed: Float) {
+        if (!speed.isFinite() ||
+            speed < AudioPlaybackSession.MIN_PLAYBACK_SPEED ||
+            speed > AudioPlaybackSession.MAX_PLAYBACK_SPEED
+        ) {
+            throw AudioError.InvalidPlaybackSpeed(speed)
+        }
+    }
 }

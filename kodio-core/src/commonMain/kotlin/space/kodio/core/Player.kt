@@ -71,6 +71,18 @@ class Player internal constructor(
         get() = session.canSeek.value
 
     /**
+     * Current playback speed multiplier.
+     */
+    val playbackSpeed: Float
+        get() = session.playbackSpeed.value
+
+    /**
+     * Flow of playback speed changes.
+     */
+    val playbackSpeedFlow: StateFlow<Float>
+        get() = session.playbackSpeed
+
+    /**
      * Whether the player is currently playing audio.
      */
     val isPlaying: Boolean
@@ -138,6 +150,13 @@ class Player internal constructor(
      */
     suspend fun seekTo(position: Duration) {
         session.seekTo(position)
+    }
+
+    /**
+     * Sets playback speed to [speed]. Supported values are 0.25x through 4.0x.
+     */
+    fun setPlaybackSpeed(speed: Float) {
+        session.setPlaybackSpeed(speed)
     }
 
     /**

@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.sound.sampled.DataLine
 import javax.sound.sampled.SourceDataLine
 import kotlin.math.roundToLong
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 import javax.sound.sampled.AudioFormat as JavaSoundAudioFormat
 import javax.sound.sampled.AudioSystem as JavaSoundAudioSystem
@@ -25,6 +26,7 @@ internal class JvmMp3PlaybackBackend(
 
     private var encodedAudio: EncodedAudio? = null
     private var line: SourceDataLine? = null
+    private var playbackSpeed: Float = AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED
 
     fun load(encodedAudio: EncodedAudio): kotlin.time.Duration? {
         if (encodedAudio.fileFormat !is AudioFileFormat.Mp3) {
@@ -87,6 +89,10 @@ internal class JvmMp3PlaybackBackend(
         line?.start()
     }
 
+    fun setPlaybackSpeed(speed: Float) {
+        playbackSpeed = speed
+    }
+
     fun stop() {
         stopRequested.set(true)
         paused.value = false
@@ -102,7 +108,7 @@ internal class JvmMp3PlaybackBackend(
 
     private fun openLine(output: SampleBuffer): SourceDataLine {
         val format = JavaSoundAudioFormat(
-            output.sampleFrequency.toFloat(),
+            (output.sampleFrequency * playbackSpeed).roundToInt().coerceAtLeast(1).toFloat(),
             16,
             output.channelCount,
             true,

@@ -290,6 +290,12 @@ fun macos_playback_session_resume(ptr: COpaquePointer) {
     session.resume()
 }
 
+@CName("macos_playback_session_set_playback_speed")
+fun macos_playback_session_set_playback_speed(ptr: COpaquePointer, speed: Float) {
+    val session = ptr.asStableRef<AudioPlaybackSession>().get()
+    session.setPlaybackSpeed(speed)
+}
+
 @CName("macos_playback_session_stop")
 fun macos_playback_session_stop(ptr: COpaquePointer) {
     val session = ptr.asStableRef<AudioPlaybackSession>().get()

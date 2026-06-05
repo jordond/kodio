@@ -460,6 +460,39 @@ class RecorderPlayerTest {
     }
 
     @Test
+    fun `Player setPlaybackSpeed delegates to playback session`() = runTest {
+        val session = FakePlaybackSession()
+        val player = Player(session)
+
+        player.setPlaybackSpeed(1.5f)
+
+        assertEquals(1.5f, session.playbackSpeed.value)
+        assertEquals(1.5f, player.playbackSpeed)
+    }
+
+    @Test
+    fun `Base playback speed updates speed flow and backend`() = runTest {
+        val session = CollectingPlaybackSession()
+
+        session.setPlaybackSpeed(2.0f)
+
+        assertEquals(2.0f, session.playbackSpeed.value)
+        assertEquals(listOf(2.0f), session.playbackSpeeds)
+    }
+
+    @Test
+    fun `Base playback speed rejects invalid values`() = runTest {
+        val session = CollectingPlaybackSession()
+
+        assertFailsWith<AudioError.InvalidPlaybackSpeed> {
+            session.setPlaybackSpeed(0.0f)
+        }
+        assertFailsWith<AudioError.InvalidPlaybackSpeed> {
+            session.setPlaybackSpeed(Float.NaN)
+        }
+    }
+
+    @Test
     fun `Base playback starts from seeked recording position`() = runTest {
         val session = CollectingPlaybackSession()
         val recording = AudioRecording.fromBytes(
@@ -650,6 +683,9 @@ class RecorderPlayerTest {
         private val _canSeek = MutableStateFlow(false)
         override val canSeek: StateFlow<Boolean> = _canSeek
 
+        private val _playbackSpeed = MutableStateFlow(AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED)
+        override val playbackSpeed: StateFlow<Float> = _playbackSpeed
+
         var stopCalled = false
         var seekPosition: Duration? = null
 
@@ -690,6 +726,10 @@ class RecorderPlayerTest {
             _position.value = position
         }
 
+        override fun setPlaybackSpeed(speed: Float) {
+            _playbackSpeed.value = speed
+        }
+
         override fun pause() {
             _state.value = AudioPlaybackSession.State.Paused
         }
@@ -712,6 +752,7 @@ class RecorderPlayerTest {
         val playedChunks = mutableListOf<ByteArray>()
         val seekPositions = mutableListOf<Duration>()
         val encodedStartPositions = mutableListOf<Duration>()
+        val playbackSpeeds = mutableListOf<Float>()
         var encodedStopCount = 0
         var encodedReleaseCount = 0
         var failEncodedLoad = false
@@ -731,6 +772,10 @@ class RecorderPlayerTest {
         override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
             encodedStartPositions += startPosition
             awaitCancellation()
+        }
+
+        override fun onPlaybackSpeedChanged(speed: Float) {
+            playbackSpeeds += speed
         }
 
         override fun onPause() = Unit

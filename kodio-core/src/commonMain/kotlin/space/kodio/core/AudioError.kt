@@ -87,6 +87,16 @@ sealed class AudioError(
     ) : AudioError("Invalid seek position: $position")
 
     /**
+     * The requested playback speed is invalid or outside the supported range.
+     */
+    data class InvalidPlaybackSpeed(
+        val speed: Float
+    ) : AudioError(
+        "Invalid playback speed: $speed. Supported range is " +
+            "${AudioPlaybackSession.MIN_PLAYBACK_SPEED}x to ${AudioPlaybackSession.MAX_PLAYBACK_SPEED}x"
+    )
+
+    /**
      * No recording data available.
      */
     class NoRecordingData : AudioError("No recording data available") {

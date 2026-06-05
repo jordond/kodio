@@ -171,6 +171,9 @@ sealed class MacosAudioQueue<S : Any>(
     fun reset(): Unit =
         runAndCheckOsStatus { AudioQueueReset(aqRef) }
 
+    fun setPlaybackRate(rate: Float): Unit =
+        runAndCheckOsStatus { AudioQueueSetParameter(aqRef, kAudioQueueParam_PlayRate, rate) }
+
     /**
      * Disposes the [aqRef].
      *

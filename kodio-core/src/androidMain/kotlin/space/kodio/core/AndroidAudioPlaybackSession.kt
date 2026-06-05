@@ -6,8 +6,10 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaDataSource
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import android.media.AudioRecord
 import android.media.AudioTrack
+import android.os.Build
 import kotlinx.coroutines.CompletableDeferred
 import space.kodio.core.io.files.AudioFileFormat
 import space.kodio.core.io.files.AudioFileReadError
@@ -69,6 +71,7 @@ internal class AndroidAudioPlaybackSession(
         // Keep old behavior: align playback rate to stream sample rate
         // (For modern apps, PlaybackParams is preferred; this preserves your logic.)
         track.playbackRate = format.sampleRate
+        track.playbackParams = playbackParamsFor(playbackSpeed.value)
         track.setVolume(AudioTrack.getMaxVolume())
 
         this.audioTrack = track
@@ -121,6 +124,7 @@ internal class AndroidAudioPlaybackSession(
         if (requestedDevice != null) setPreferredDevice(context, requestedDevice, player)
         releaseLoadedEncodedAudio()
         mediaPlayer = player
+        applyPlaybackSpeedToMediaPlayer(player, playbackSpeed.value)
         return player.duration.milliseconds
     }
 
@@ -135,6 +139,11 @@ internal class AndroidAudioPlaybackSession(
         player.seekTo(startPosition.inWholeMilliseconds.toInt())
         player.start()
         finished.await()
+    }
+
+    override fun onPlaybackSpeedChanged(speed: Float) {
+        audioTrack?.playbackParams = playbackParamsFor(speed)
+        mediaPlayer?.let { applyPlaybackSpeedToMediaPlayer(it, speed) }
     }
 
     override fun onPause() {
@@ -165,6 +174,15 @@ internal class AndroidAudioPlaybackSession(
     }
 }
 
+private fun playbackParamsFor(speed: Float): PlaybackParams =
+    PlaybackParams()
+        .setSpeed(speed)
+        .setPitch(1.0f)
+
+private fun applyPlaybackSpeedToMediaPlayer(player: MediaPlayer, speed: Float) {
+    player.playbackParams = playbackParamsFor(speed)
+}
+
 /* -------------------- Helpers used above -------------------- */
 
 private fun ensureInterleaved(fmt: AudioFormat) {
@@ -184,6 +202,7 @@ private fun setPreferredDevice(context: Context, requestedDevice: AudioDevice.Ou
 }
 
 private fun setPreferredDevice(context: Context, requestedDevice: AudioDevice.Output, mediaPlayer: MediaPlayer) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
     val selectedDevice = devices.firstOrNull { it.id.toString() == requestedDevice.id }

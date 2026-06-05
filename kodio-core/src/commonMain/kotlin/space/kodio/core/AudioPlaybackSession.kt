@@ -27,6 +27,9 @@ interface AudioPlaybackSession {
     /** Whether the loaded audio can seek to arbitrary positions. */
     val canSeek: StateFlow<Boolean>
 
+    /** Current playback speed multiplier. */
+    val playbackSpeed: StateFlow<Float>
+
     /** Loads the given audio data. */
     suspend fun load(audioFlow: AudioFlow)
 
@@ -43,6 +46,9 @@ interface AudioPlaybackSession {
 
     /** Seeks playback to [position]. */
     suspend fun seekTo(position: Duration)
+
+    /** Sets playback speed to [speed]. Supported values are 0.25x through 4.0x. */
+    fun setPlaybackSpeed(speed: Float)
 
     /** Pauses the playback. */
     fun pause()
@@ -71,5 +77,11 @@ interface AudioPlaybackSession {
         data object Paused : State()
         data object Finished : State()
         data class Error(val error: Throwable) : State()
+    }
+
+    companion object {
+        const val DEFAULT_PLAYBACK_SPEED: Float = 1.0f
+        const val MIN_PLAYBACK_SPEED: Float = 0.25f
+        const val MAX_PLAYBACK_SPEED: Float = 4.0f
     }
 }
