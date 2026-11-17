@@ -70,6 +70,17 @@ internal class NativeMacosAudioPlaybackSession(
     private var loaded = false
     private var loadedRecording: AudioRecording? = null
     private var resumeShouldPlayFromSeek = false
+
+    /**
+     * Bumped by every call that ends or replaces a playback (stop, load, seek, a pause of a
+     * pending play). The play a resume after a paused seek launches runs only while the
+     * generation it was launched under is still current.
+     */
+    @Volatile
+    private var playGeneration = 0L
+
+    /** The play a resume after a paused seek launched, until it runs. */
+    private var resumePlayJob: Job? = null
     private var completionJob: Job? = null
     private var positionJob: Job? = null
     private var positionStartedAt: TimeSource.Monotonic.ValueTimeMark? = null
@@ -77,6 +88,7 @@ internal class NativeMacosAudioPlaybackSession(
     private val completionScope = CoroutineScope(completionDispatcher + SupervisorJob())
 
     override suspend fun load(audioFlow: AudioFlow) {
+        dropPendingPlay()
         stopPositionTracking(updatePosition = false)
         completionJob?.cancel()
         mp3Backend.release()
@@ -91,6 +103,7 @@ internal class NativeMacosAudioPlaybackSession(
     }
 
     override suspend fun load(recording: AudioRecording) {
+        dropPendingPlay()
         stopPositionTracking(updatePosition = false)
         completionJob?.cancel()
         mp3Backend.release()
@@ -229,6 +242,7 @@ internal class NativeMacosAudioPlaybackSession(
     }
 
     override suspend fun seekTo(position: Duration) {
+        dropPendingPlay()
         val encodedAudio = _encodedAudio.value
         if (encodedAudio != null) {
             val targetPosition = normalizedEncodedSeekPosition(position)
@@ -306,6 +320,15 @@ internal class NativeMacosAudioPlaybackSession(
     }
 
     override fun pause() {
+        // A resume after a paused seek launched a play that has not run yet: drop it, and
+        // leave the next resume to play again.
+        val pendingPlay = resumePlayJob
+        if (_state.value is AudioPlaybackSession.State.Ready && pendingPlay != null && pendingPlay.isActive) {
+            dropPendingPlay()
+            resumeShouldPlayFromSeek = true
+            _state.value = AudioPlaybackSession.State.Paused
+            return
+        }
         if (_state.value !is AudioPlaybackSession.State.Playing) return
         stopPositionTracking(updatePosition = true)
         if (_encodedAudio.value != null) {
@@ -321,7 +344,12 @@ internal class NativeMacosAudioPlaybackSession(
         if (_state.value !is AudioPlaybackSession.State.Paused) return
         if (resumeShouldPlayFromSeek) {
             resumeShouldPlayFromSeek = false
-            completionScope.launch { play() }
+            val generation = playGeneration
+            _state.value = AudioPlaybackSession.State.Ready
+            // A stop, load, seek or pause that lands before this runs wins: the play is not made.
+            resumePlayJob = completionScope.launch {
+                if (playGeneration == generation && _state.value is AudioPlaybackSession.State.Ready) play()
+            }
             return
         }
         if (_encodedAudio.value != null) {
@@ -336,6 +364,7 @@ internal class NativeMacosAudioPlaybackSession(
     }
 
     override fun stop() {
+        dropPendingPlay()
         stopPositionTracking(updatePosition = false)
         completionJob?.cancel()
         mp3Backend.stop()
@@ -356,6 +385,12 @@ internal class NativeMacosAudioPlaybackSession(
         _duration.value = null
         _canSeek.value = false
         _state.value = AudioPlaybackSession.State.Idle
+    }
+
+    private fun dropPendingPlay() {
+        playGeneration++
+        resumePlayJob?.cancel()
+        resumePlayJob = null
     }
 
     private fun playEncoded(encodedAudio: EncodedAudio) {
