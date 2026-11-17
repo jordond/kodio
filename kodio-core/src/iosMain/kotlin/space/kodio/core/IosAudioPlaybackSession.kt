@@ -26,7 +26,10 @@ private val log = namedLogger("IosAudioPlayback")
  *
  * An interruption (a call, an alarm) stops the engine, and the system does not start it
  * again. A playing sound is paused when the interruption begins. When it ends:
- * - with leave to resume, the sound is resumed;
+ * - with leave to resume, the sound is resumed on a restarted engine. The player node the
+ *   engine stopped under has to be stopped before it plays again, and that stop drops what
+ *   was scheduled on it: the sound goes on from the first buffer scheduled after the resume,
+ *   and a sound that was scheduled whole (a short one) ends [State.Finished] there;
  * - without it, the play ends in [State.Error] with [AVAudioSessionException.Interrupted]:
  *   the sound did not reach its end, so [State.Finished] would be untrue, and a caller
  *   waiting in [Player.awaitComplete] learns why it stopped.

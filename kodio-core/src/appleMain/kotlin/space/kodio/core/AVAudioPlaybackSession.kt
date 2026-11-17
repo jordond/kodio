@@ -203,7 +203,9 @@ abstract class AVAudioPlaybackSession(
      * @param nodeIsStale the engine stopped under the node. Such a node may still say it is
      * playing, and a play alone does not start it: it has to be stopped first. The stop ends
      * what was scheduled (each buffer's completion runs), so no wait for a buffer is left
-     * without an end.
+     * without an end. What was scheduled is dropped, not played: after an interruption or a
+     * configuration change the sound goes on only with the buffers scheduled after this, and
+     * a sound that was scheduled whole ends [AudioPlaybackSession.State.Finished].
      */
     private fun playNode(nodeIsStale: Boolean) {
         if (nodeIsStale) KodioPlayerNodeStop(player).throwIfRaised()

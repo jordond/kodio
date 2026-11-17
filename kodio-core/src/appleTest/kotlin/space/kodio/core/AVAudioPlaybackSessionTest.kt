@@ -200,7 +200,7 @@ internal class AVAudioPlaybackSessionTest {
     }
 
     @Test
-    fun `a sound goes on to its end when the engine stopped under it is recovered`() = withAudioOutput {
+    fun `a sound whose engine was stopped under it plays the buffers scheduled after the recovery to the end`() = withAudioOutput {
         val session = TestSession()
         val firstScheduled = CompletableDeferred<Unit>()
         val gate = CompletableDeferred<Unit>()
