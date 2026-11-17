@@ -286,7 +286,7 @@ abstract class BaseAudioPlaybackSession(
         }
     }
 
-    final override fun pause() {
+    final override fun pause() = serialized {
         log.info { "pause()" }
         // A resume after a paused seek launched a play that has not run yet: drop it.
         val pendingPlay = resumePlayJob
@@ -295,16 +295,16 @@ abstract class BaseAudioPlaybackSession(
             pendingPlay.cancel()
             resumePlayJob = null
             _state.value = State.Paused
-            return
+            return@serialized
         }
-        if (_state.value !is State.Playing) return
+        if (_state.value !is State.Playing) return@serialized
         stopPositionTracking(updatePosition = true)
         runAndUpdateState(State.Paused, ::onPause)
     }
 
-    final override fun resume() {
+    final override fun resume() = serialized {
         log.info { "resume()" }
-        if (_state.value !is State.Paused) return
+        if (_state.value !is State.Paused) return@serialized
         // A seek while paused stops the backend, so there is nothing left to resume: play again.
         if (playbackJob == null && (loadedRecording != null || _encodedAudio.value != null)) {
             val generation = playGeneration
@@ -313,13 +313,18 @@ abstract class BaseAudioPlaybackSession(
             resumePlayJob = scope.launch {
                 if (playGeneration == generation && _state.value is State.Ready) play()
             }
-            return
+            return@serialized
         }
         runAndUpdateState(State.Playing, ::onResume)
         startPositionTracking(_position.value)
     }
 
-    final override fun stop() {
+    /**
+     * Stops the playback and returns the session to [State.Idle], which also ends a wait in
+     * [Player.awaitComplete]: a sound the platform paused and never gave back (an iOS
+     * interruption with no end) is let go of here.
+     */
+    final override fun stop() = serialized {
         log.info { "stop()" }
         stopPositionTracking(updatePosition = false)
         _position.value = Duration.ZERO
@@ -334,7 +339,7 @@ abstract class BaseAudioPlaybackSession(
         }
     }
 
-    final override fun release() {
+    final override fun release() = serialized {
         log.info { "release()" }
         stop()
         releaseLoadedEncodedIfIdle()
@@ -344,6 +349,34 @@ abstract class BaseAudioPlaybackSession(
         _duration.value = null
         _canSeek.value = false
         _state.value = State.Idle
+    }
+
+    /**
+     * Runs [block] serialised with [pause], [resume], [stop] and [release], which run in it.
+     * A platform that calls into the session from its own threads (an iOS interruption)
+     * overrides this with its lock, and makes its check of the state and its call one step.
+     * The lock must be reentrant: [release] calls [stop], and both call into the backend.
+     */
+    protected open fun <T> serialized(block: () -> T): T = block()
+
+    /**
+     * Ends the play that is playing or paused in [State.Error] with [failure], for a sound the
+     * platform took away and will not give back. The backend is stopped and the playback job
+     * cancelled, so a wait in [Player.awaitComplete] returns. Does nothing in any other state.
+     */
+    protected fun endPlayback(failure: Throwable) = serialized {
+        val current = _state.value
+        if (current !is State.Playing && current !is State.Paused) return@serialized
+        log.warn { "Playback ended by the platform: ${failure.message}" }
+        stopPositionTracking(updatePosition = current is State.Playing)
+        playGeneration++
+        resumePlayJob?.cancel()
+        resumePlayJob = null
+        runCatching { onStop() }
+            .onFailure { log.error(it) { "Failed to stop the ended playback: ${it.message}" } }
+        playbackJob?.cancel()
+        playbackJob = null
+        _state.value = State.Error(failure)
     }
 
     protected fun runAndUpdateState(newState: State, block: () -> Unit) {

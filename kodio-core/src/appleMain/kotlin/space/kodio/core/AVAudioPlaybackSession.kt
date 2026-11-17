@@ -161,6 +161,9 @@ abstract class AVAudioPlaybackSession(
         }
     }
 
+    /** The session's pause, resume and stop take [engineLock], as the notifications do. */
+    override fun <T> serialized(block: () -> T): T = engineLock.withLock(block)
+
     /** A seam for tests, called under the lock between the engine check and the node's play. */
     internal open fun onBeforeNodeStart() = Unit
 

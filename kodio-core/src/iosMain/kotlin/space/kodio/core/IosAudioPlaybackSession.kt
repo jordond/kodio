@@ -10,9 +10,11 @@ import platform.AVFAudio.AVAudioSessionInterruptionTypeKey
 import platform.AVFAudio.currentRoute
 import platform.AVFAudio.outputNumberOfChannels
 import platform.AVFAudio.sampleRate
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import platform.Foundation.NSNotification
 import platform.Foundation.NSNumber
+import space.kodio.core.AudioPlaybackSession.State
 import space.kodio.core.util.namedLogger
 
 private val log = namedLogger("IosAudioPlayback")
@@ -21,17 +23,32 @@ private val log = namedLogger("IosAudioPlayback")
  * IOS implementation for [AVAudioPlaybackSession].
  *
  * In IOS, we cannot control the output device, so we ignore it.
+ *
+ * An interruption (a call, an alarm) stops the engine, and the system does not start it
+ * again. A playing sound is paused when the interruption begins. When it ends:
+ * - with leave to resume, the sound is resumed;
+ * - without it, the play ends in [State.Error] with [AVAudioSessionException.Interrupted]:
+ *   the sound did not reach its end, so [State.Finished] would be untrue, and a caller
+ *   waiting in [Player.awaitComplete] learns why it stopped.
+ *
+ * The system does not promise an end to an interruption. Until one comes the sound stays
+ * [State.Paused]: [resume] plays it again, and [stop] or [release] end a wait in
+ * [Player.awaitComplete].
  */
 class IosAudioPlaybackSession() : AVAudioPlaybackSession() {
 
-    /** A sound was playing when an interruption began, and this session paused it. */
-    private var pausedByInterruption = false
+    private val interruption = InterruptionPause(
+        state = { state.value },
+        pause = ::pause,
+        resume = ::resume,
+        end = ::endPlayback,
+    )
+
+    /** The handling of the last interruption notification, for tests to join. */
+    internal var lastInterruption: Job? = null
+        private set
 
     init {
-        // The system stops the engine for an interruption (a call, an alarm) and does not
-        // start it again. Left Playing, the session would wait on buffers that never end, so
-        // the sound is paused; it goes on when the interruption ends and the system says it
-        // may, or at the next resume, which starts the engine again.
         observeNotification(AVAudioSessionInterruptionNotification, AVAudioSession.sharedInstance()) { notification ->
             (this as? IosAudioPlaybackSession)?.onInterruption(notification)
         }
@@ -41,25 +58,27 @@ class IosAudioPlaybackSession() : AVAudioPlaybackSession() {
         val info = notification.userInfo
         val type = (info?.get(AVAudioSessionInterruptionTypeKey) as? NSNumber)?.unsignedLongValue
         val options = (info?.get(AVAudioSessionInterruptionOptionKey) as? NSNumber)?.unsignedLongValue ?: 0u
-        // Off the notification's thread.
-        scope.launch {
-            when (type) {
-                AVAudioSessionInterruptionTypeBegan -> if (state.value is AudioPlaybackSession.State.Playing) {
-                    log.info { "Interruption began, pausing" }
-                    pausedByInterruption = true
-                    pause()
-                }
-                AVAudioSessionInterruptionTypeEnded -> {
-                    val resume = pausedByInterruption &&
-                        options and AVAudioSessionInterruptionOptionShouldResume != 0uL
-                    pausedByInterruption = false
-                    if (resume) {
-                        log.info { "Interruption ended, resuming" }
-                        resume()
-                    }
+        // Off the notification's thread. The check of the state and the call that follows it
+        // are one step against the caller's pause, resume and stop.
+        lastInterruption = scope.launch {
+            serialized {
+                when (type) {
+                    AVAudioSessionInterruptionTypeBegan -> interruption.began()
+                    AVAudioSessionInterruptionTypeEnded ->
+                        interruption.ended(shouldResume = options and AVAudioSessionInterruptionOptionShouldResume != 0uL)
                 }
             }
         }
+    }
+
+    override fun onResume() = serialized {
+        interruption.forget()
+        super.onResume()
+    }
+
+    override fun onStop() = serialized {
+        interruption.forget()
+        super.onStop()
     }
 
     override fun configureAudioSession() {
@@ -73,5 +92,52 @@ class IosAudioPlaybackSession() : AVAudioPlaybackSession() {
                 "outputChannels=${session.outputNumberOfChannels}, " +
                 "currentRoute.outputs=${session.currentRoute.outputs}"
         }
+    }
+}
+
+/**
+ * Pauses a playing sound for an interruption and decides what its end does: [resume] with
+ * the system's leave, otherwise [end] the play with [AVAudioSessionException.Interrupted].
+ * Every call is made under the session's serialisation.
+ */
+internal class InterruptionPause(
+    private val state: () -> State,
+    private val pause: () -> Unit,
+    private val resume: () -> Unit,
+    private val end: (Throwable) -> Unit,
+) {
+
+    /**
+     * A sound was playing when an interruption began, and it was paused for it. [forget] clears
+     * it, at a stop and at a resume, so the end of the interruption neither resumes nor ends a
+     * sound the caller stopped, or resumed and paused again.
+     */
+    private var pausedByInterruption = false
+
+    fun began() {
+        if (state() !is State.Playing) return
+        log.info { "Interruption began, pausing" }
+        pause()
+        pausedByInterruption = state() is State.Paused
+    }
+
+    fun ended(shouldResume: Boolean) {
+        val interrupted = pausedByInterruption && state() is State.Paused
+        pausedByInterruption = false
+        when {
+            !interrupted -> Unit
+            shouldResume -> {
+                log.info { "Interruption ended, resuming" }
+                resume()
+            }
+            else -> {
+                log.info { "Interruption ended without leave to resume, ending the play" }
+                end(AVAudioSessionException.Interrupted())
+            }
+        }
+    }
+
+    fun forget() {
+        pausedByInterruption = false
     }
 }

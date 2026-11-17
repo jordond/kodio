@@ -205,12 +205,16 @@ class Player internal constructor(
     }
 
     /**
-     * Waits for playback to complete (finish or error).
+     * Waits for playback to be over: finished, failed, or stopped. [stop] and [release] return
+     * the session to [AudioPlaybackSession.State.Idle], which ends the wait, so a sound the
+     * platform paused and never gave back (an iOS interruption with no end) does not hold the
+     * caller forever. Returns at once on a player with nothing loaded.
      */
     suspend fun awaitComplete() {
         session.state.first {
             it is AudioPlaybackSession.State.Finished ||
-            it is AudioPlaybackSession.State.Error
+            it is AudioPlaybackSession.State.Error ||
+            it is AudioPlaybackSession.State.Idle
         }
     }
 

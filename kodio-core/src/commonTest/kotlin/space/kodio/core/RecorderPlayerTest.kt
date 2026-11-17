@@ -3,6 +3,7 @@ package space.kodio.core
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -709,6 +710,69 @@ class RecorderPlayerTest {
         assertTrue(session.state.value is AudioPlaybackSession.State.Error)
     }
 
+    @Test
+    fun `Player awaitComplete returns when the player is stopped`() = runTest {
+        val session = collectingSession()
+        session.holdPlayback = true
+        val player = Player(session)
+        player.load(AudioRecording.fromBytes(seekTestFormat, byteArrayOf(0, 1, 2, 3)))
+        player.start()
+        player.pause()
+        val completed = async { player.awaitComplete() }
+        runCurrent()
+        assertFalse(completed.isCompleted)
+
+        player.stop()
+        runCurrent()
+
+        assertTrue(completed.isCompleted)
+    }
+
+    @Test
+    fun `Base endPlayback stops the backend and ends a paused play in the error`() = runTest {
+        val session = collectingSession()
+        session.holdPlayback = true
+        session.load(AudioRecording.fromBytes(seekTestFormat, byteArrayOf(0, 1, 2, 3)))
+        session.play()
+        runCurrent()
+        session.pause()
+        val failure = IllegalStateException("taken away")
+
+        session.end(failure)
+        session.heldPlaybacks[0].complete(Unit)
+        runCurrent()
+
+        assertEquals(AudioPlaybackSession.State.Error(failure), session.state.value)
+        assertEquals(1, session.encodedStopCount)
+    }
+
+    @Test
+    fun `Base endPlayback leaves a stopped session alone`() = runTest {
+        val session = collectingSession()
+        session.load(AudioRecording.fromBytes(seekTestFormat, byteArrayOf(0, 1, 2, 3)))
+
+        session.end(IllegalStateException("taken away"))
+
+        assertEquals(AudioPlaybackSession.State.Ready, session.state.value)
+        assertEquals(0, session.encodedStopCount)
+    }
+
+    @Test
+    fun `Base pause resume and stop reach the backend inside serialized`() = runTest {
+        val session = collectingSession()
+        session.holdPlayback = true
+        session.load(AudioRecording.fromBytes(seekTestFormat, byteArrayOf(0, 1, 2, 3)))
+        session.play()
+        runCurrent()
+
+        session.pause()
+        session.resume()
+        session.stop()
+
+        assertEquals(listOf("pause", "resume", "stop"), session.backendCalls)
+        assertTrue(session.backendCallsOutsideSerialized.isEmpty(), "${session.backendCallsOutsideSerialized}")
+    }
+
     // ==================== Fake Implementations ====================
 
     private val seekTestFormat = AudioFormat(
@@ -759,15 +823,37 @@ class RecorderPlayerTest {
             playbackSpeeds += speed
         }
 
-        override fun onPause() = Unit
+        private var serializedDepth = 0
+        val backendCalls = mutableListOf<String>()
+        val backendCallsOutsideSerialized = mutableListOf<String>()
+
+        override fun <T> serialized(block: () -> T): T {
+            serializedDepth++
+            try {
+                return block()
+            } finally {
+                serializedDepth--
+            }
+        }
+
+        private fun backendCall(name: String) {
+            backendCalls += name
+            if (serializedDepth == 0) backendCallsOutsideSerialized += name
+        }
+
+        fun end(failure: Throwable) = endPlayback(failure)
+
+        override fun onPause() = backendCall("pause")
 
         var resumeCount = 0
 
         override fun onResume() {
+            backendCall("resume")
             resumeCount++
         }
 
         override fun onStop() {
+            backendCall("stop")
             encodedStopCount++
         }
 
