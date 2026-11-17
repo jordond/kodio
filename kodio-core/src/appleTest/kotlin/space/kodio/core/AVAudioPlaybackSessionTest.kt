@@ -57,6 +57,13 @@ internal class AVAudioPlaybackSessionTest {
             beforeSchedule?.invoke(this)
         }
 
+        /** Runs on the MP3 play job, under the engine lock, before the MP3 plays. */
+        var beforeEncodedPlay: (TestSession.() -> Unit)? = null
+
+        override fun onBeforeEncodedPlay() {
+            beforeEncodedPlay?.invoke(this)
+        }
+
         override fun onBeforeNodeStart() {
             if (engineStopsBeforeNodeStart > 0) {
                 engineStopsBeforeNodeStart--
@@ -361,6 +368,30 @@ internal class AVAudioPlaybackSessionTest {
             session.resume()
             assertEquals(State.Playing, session.state.value)
             assertTrue(session.isEncodedPlaying)
+            session.release()
+        }
+    }
+
+    @Test
+    fun `a stop while the MP3 job waits for the lock leaves the MP3 stopped`() {
+        if (!canStartAnEngine()) {
+            println("No audio output on this host, skipped")
+            return
+        }
+        runTest {
+            val session = TestSession(StandardTestDispatcher(testScheduler))
+            session.load(EncodedAudio.fromBytes(silentMp3(frames = 100), AudioFileFormat.Mp3, "silence.mp3"))
+            // The stop lands as the job takes the lock, as one that held it while the job waited would.
+            session.beforeEncodedPlay = {
+                beforeEncodedPlay = null
+                stop()
+            }
+
+            session.play()
+            runCurrent()
+
+            assertEquals(State.Idle, session.state.value)
+            assertFalse(session.isEncodedPlaying)
             session.release()
         }
     }

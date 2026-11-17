@@ -11,6 +11,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.lastOrNull
+import kotlinx.coroutines.job
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.io.Buffer
@@ -170,6 +171,9 @@ abstract class AVAudioPlaybackSession(
 
     /** A seam for tests, called under the lock before each buffer is scheduled. */
     internal open fun onBeforeSchedule() = Unit
+
+    /** A seam for tests, called under the lock before the loaded MP3 plays. */
+    internal open fun onBeforeEncodedPlay() = Unit
 
     /**
      * Starts the player node, on a running engine. A node that does not start is answered
@@ -442,7 +446,12 @@ abstract class AVAudioPlaybackSession(
 
     override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
         val player = encodedPlayer ?: return
+        val job = currentCoroutineContext().job
         engineLock.withLock {
+            onBeforeEncodedPlay()
+            // A stop that held the lock while this job waited for it cancelled the job and
+            // stopped the player: playing now would run the MP3 to its end on an idle session.
+            if (!job.isActive) throw CancellationException("The playback was stopped")
             player.currentTime = startPosition.inWholeMilliseconds / 1000.0
             // A pause that came before this job ran leaves the sound to onResume.
             if (!paused && !player.play()) {
