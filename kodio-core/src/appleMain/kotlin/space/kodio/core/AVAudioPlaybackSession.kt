@@ -25,6 +25,7 @@ import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.io.convertSimple
 import space.kodio.core.io.toIosAudioBuffer
 import space.kodio.core.util.namedLogger
+import kotlin.concurrent.Volatile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -41,6 +42,14 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
     private var deinterleaveConverter: AVAudioConverter? = null
     private var encodedPlayer: AVAudioPlayer? = null
     private var encodedTempPath: Path? = null
+
+    /**
+     * True once [playBlocking] has scheduled a buffer and started [player]. AVAudioPlayerNode.play()
+     * raises an NSException ("player did not see an IO cycle." or "player started when engine not
+     * running"), which aborts a Kotlin/Native process, when it runs before that point.
+     */
+    @Volatile
+    private var nodeStarted = false
 
     init {
         engine.attachNode(player)
@@ -148,7 +157,7 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
         var bufferCount = 0
         // play() must follow at least one scheduleBuffer; otherwise AVFAudio throws
         // "player did not see an IO cycle" (NSException, fatal on Kotlin/Native).
-        var playerStarted = false
+        nodeStarted = false
         val lastCompletable = audioFlow.map { bytes ->
             bufferCount++
             var iosAudioBuffer = bytes.toIosAudioBuffer(bufferFormat)
@@ -162,10 +171,10 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
             player.scheduleBuffer(iosAudioBuffer) {
                 iosAudioBufferFinishedIndicator.complete(Unit)
             }
-            if (!playerStarted) {
-                playerStarted = true
+            if (!nodeStarted) {
                 log.debug { "First buffer scheduled, starting player" }
                 player.play()
+                nodeStarted = true
             }
             iosAudioBufferFinishedIndicator
         }.lastOrNull()
@@ -234,12 +243,21 @@ abstract class AVAudioPlaybackSession() : BaseAudioPlaybackSession() {
 
     override fun onResume() {
         log.info { "onResume()" }
-        encodedPlayer?.play()
-        player.play()
+        val encoded = encodedPlayer
+        if (encoded != null) {
+            encoded.play()
+            return
+        }
+        // MP3 playback never starts the engine, and a pause can land before the first buffer
+        // is scheduled: in both cases the node must not be played here.
+        if (nodeStarted && engine.isRunning()) {
+            player.play()
+        }
     }
 
     override fun onStop() {
         log.info { "onStop()" }
+        nodeStarted = false
         encodedPlayer?.let {
             it.stop()
             it.currentTime = 0.0

@@ -261,7 +261,8 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     final override fun resume() {
         log.info { "resume()" }
         if (_state.value !is State.Paused) return
-        if (_state.value is State.Paused && playbackJob == null && loadedRecording != null) {
+        // A seek while paused stops the backend, so there is nothing left to resume: play again.
+        if (playbackJob == null && (loadedRecording != null || _encodedAudio.value != null)) {
             _state.value = State.Ready
             scope.launch { play() }
             return

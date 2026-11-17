@@ -586,6 +586,27 @@ class RecorderPlayerTest {
     }
 
     @Test
+    fun `Base encoded resume after a paused seek plays again instead of resuming the stopped backend`() = runTest {
+        val session = CollectingPlaybackSession()
+        val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
+
+        session.load(encoded)
+        session.play()
+        session.waitForEncodedPlayCount(1)
+        session.pause()
+        session.seekTo(4.milliseconds)
+        assertEquals(AudioPlaybackSession.State.Paused, session.state.value)
+
+        session.resume()
+        session.waitForEncodedPlayCount(2)
+
+        assertEquals(4.milliseconds, session.encodedStartPositions[1])
+        assertEquals(0, session.resumeCount)
+        assertEquals(AudioPlaybackSession.State.Playing, session.state.value)
+        session.stop()
+    }
+
+    @Test
     fun `Base release frees loaded encoded backend`() = runTest {
         val session = CollectingPlaybackSession()
         val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
@@ -656,7 +677,11 @@ class RecorderPlayerTest {
 
         override fun onPause() = Unit
 
-        override fun onResume() = Unit
+        var resumeCount = 0
+
+        override fun onResume() {
+            resumeCount++
+        }
 
         override fun onStop() {
             encodedStopCount++
