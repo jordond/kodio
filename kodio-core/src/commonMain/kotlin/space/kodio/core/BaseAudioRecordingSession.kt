@@ -166,15 +166,26 @@ abstract class BaseAudioRecordingSession : AudioRecordingSession {
                 awaitClose(::cleanup)
             }
 
-            platformFlow.collect { chunk ->
-                emitCount++
-                if (emitCount <= 3 || emitCount % 50 == 0) {
-                    logger.debug { "Emitting chunk #$emitCount to hotSource: size=${chunk.size}" }
+            try {
+                platformFlow.collect { chunk ->
+                    emitCount++
+                    if (emitCount <= 3 || emitCount % 50 == 0) {
+                        logger.debug { "Emitting chunk #$emitCount to hotSource: size=${chunk.size}" }
+                    }
+                    recordedChunks.add(chunk)
+                    hotSource.emit(chunk)
                 }
-                recordedChunks.add(chunk)
-                hotSource.emit(chunk)
+                logger.debug { "Recording job finished, emitted $emitCount chunks" }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A device that cannot start must end in State.Error. Left uncaught, the
+                // exception would reach the scope and, on native targets, end the process.
+                logger.error(e) { "Recording failed: ${e.message}" }
+                runCatching { cleanup() }
+                    .onFailure { logger.error(it) { "Cleanup after a failed recording failed: ${it.message}" } }
+                _state.value = State.Error(e)
             }
-            logger.debug { "Recording job finished, emitted $emitCount chunks" }
         }
     }
 

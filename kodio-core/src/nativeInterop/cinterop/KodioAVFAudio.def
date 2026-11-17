@@ -1,0 +1,125 @@
+language = Objective-C
+package = space.kodio.core.objc
+---
+#import <Foundation/Foundation.h>
+#import <AVFAudio/AVFAudio.h>
+
+// AVFAudio reports misuse and a dead IO unit by raising an NSException, which
+// Kotlin/Native cannot catch: a Kotlin frame between the throw and the catch
+// terminates the process. Every raising call therefore lives here, inside an
+// @try with no Kotlin frame in between. Each function returns the exception
+// that was raised, or nil. A value the call produces is handed to a block,
+// because cinterop does not import a function with an object out-parameter.
+
+#if __has_feature(objc_arc)
+#define KODIO_KEEP(e) (e)
+#else
+#define KODIO_KEEP(e) [[(e) retain] autorelease]
+#endif
+
+#define KODIO_TRY(...) \
+    @try { __VA_ARGS__; } \
+    @catch (NSException *kodioRaised) { return KODIO_KEEP(kodioRaised); }
+
+NS_ASSUME_NONNULL_BEGIN
+
+static inline NSException * _Nullable KodioEngineAttachNode(AVAudioEngine *engine, AVAudioNode *node) {
+    KODIO_TRY([engine attachNode:node])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioEngineConnect(AVAudioEngine *engine, AVAudioNode *source,
+                                                         AVAudioNode *destination, AVAudioFormat * _Nullable format) {
+    KODIO_TRY([engine connect:source to:destination format:format])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioEngineDisconnectNodeOutput(AVAudioEngine *engine, AVAudioNode *node) {
+    KODIO_TRY([engine disconnectNodeOutput:node])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioEngineMainMixerNode(AVAudioEngine *engine,
+                                                               void (NS_NOESCAPE ^result)(AVAudioMixerNode *node)) {
+    AVAudioMixerNode *node = nil;
+    KODIO_TRY(node = engine.mainMixerNode)
+    result(node);
+    return nil;
+}
+
+static inline NSException * _Nullable KodioEngineInputNode(AVAudioEngine *engine,
+                                                           void (NS_NOESCAPE ^result)(AVAudioInputNode *node)) {
+    AVAudioInputNode *node = nil;
+    KODIO_TRY(node = engine.inputNode)
+    result(node);
+    return nil;
+}
+
+static inline NSException * _Nullable KodioEnginePrepare(AVAudioEngine *engine) {
+    KODIO_TRY([engine prepare])
+    return nil;
+}
+
+/** Calls `failed` when the engine did not start and raised nothing. */
+static inline NSException * _Nullable KodioEngineStart(AVAudioEngine *engine,
+                                                       void (NS_NOESCAPE ^failed)(NSError * _Nullable error)) {
+    NSError *error = nil;
+    BOOL started = NO;
+    KODIO_TRY(started = [engine startAndReturnError:&error])
+    if (!started) failed(error);
+    return nil;
+}
+
+static inline NSException * _Nullable KodioEngineStop(AVAudioEngine *engine) {
+    KODIO_TRY([engine stop])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioPlayerNodePlay(AVAudioPlayerNode *player) {
+    KODIO_TRY([player play])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioPlayerNodePause(AVAudioPlayerNode *player) {
+    KODIO_TRY([player pause])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioPlayerNodeStop(AVAudioPlayerNode *player) {
+    KODIO_TRY([player stop])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioPlayerNodeScheduleBuffer(AVAudioPlayerNode *player, AVAudioPCMBuffer *buffer,
+                                                                    void (^ _Nullable completionHandler)(void)) {
+    KODIO_TRY([player scheduleBuffer:buffer completionHandler:completionHandler])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioNodeInstallTap(AVAudioNode *node, AVAudioNodeBus bus,
+                                                          AVAudioFrameCount bufferSize, AVAudioFormat * _Nullable format,
+                                                          void (^tapBlock)(AVAudioPCMBuffer *buffer, AVAudioTime *when)) {
+    KODIO_TRY([node installTapOnBus:bus bufferSize:bufferSize format:format block:tapBlock])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioNodeRemoveTap(AVAudioNode *node, AVAudioNodeBus bus) {
+    KODIO_TRY([node removeTapOnBus:bus])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioNodeOutputFormat(AVAudioNode *node, AVAudioNodeBus bus,
+                                                            void (NS_NOESCAPE ^result)(AVAudioFormat *format)) {
+    AVAudioFormat *format = nil;
+    KODIO_TRY(format = [node outputFormatForBus:bus])
+    result(format);
+    return nil;
+}
+
+/** Raises and catches, for the tests of the catching itself. */
+static inline NSException * _Nullable KodioRaise(NSString *name, NSString *reason) {
+    KODIO_TRY([NSException raise:name format:@"%@", reason])
+    return nil;
+}
+
+NS_ASSUME_NONNULL_END

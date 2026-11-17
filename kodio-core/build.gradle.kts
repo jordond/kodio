@@ -3,6 +3,7 @@
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -43,6 +44,11 @@ kotlin {
         macosTarget.binaries.executable {
             entryPoint = "main"  // Change to "main" for full recording+playback test
         }
+    }
+    // Every native target is an Apple one. The ObjC shim catches the NSExceptions
+    // AVFAudio raises, which Kotlin cannot (src/nativeInterop/cinterop/KodioAVFAudio.def).
+    targets.withType<KotlinNativeTarget>().configureEach {
+        compilations.getByName("main").cinterops.create("KodioAVFAudio")
     }
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
     applyDefaultHierarchyTemplate {
