@@ -75,6 +75,16 @@ static inline NSException * _Nullable KodioEngineStop(AVAudioEngine *engine) {
     return nil;
 }
 
+static inline NSException * _Nullable KodioEnginePause(AVAudioEngine *engine) {
+    KODIO_TRY([engine pause])
+    return nil;
+}
+
+static inline NSException * _Nullable KodioEngineReset(AVAudioEngine *engine) {
+    KODIO_TRY([engine reset])
+    return nil;
+}
+
 static inline NSException * _Nullable KodioPlayerNodePlay(AVAudioPlayerNode *player) {
     KODIO_TRY([player play])
     return nil;

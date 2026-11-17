@@ -8,7 +8,9 @@ import platform.AVFAudio.AVAudioFormat
 import platform.AVFAudio.AVAudioInputNode
 import platform.Foundation.NSError
 import space.kodio.core.objc.KodioEngineInputNode
+import space.kodio.core.objc.KodioEnginePause
 import space.kodio.core.objc.KodioEnginePrepare
+import space.kodio.core.objc.KodioEngineReset
 import space.kodio.core.objc.KodioEngineStart
 import space.kodio.core.objc.KodioEngineStop
 import space.kodio.core.objc.KodioNodeInstallTap
@@ -139,7 +141,8 @@ abstract class AVAudioRecordingSession(
             val inputNode = inputNode()
             KodioNodeRemoveTap(inputNode, 0u).throwIfRaised()
         }.onFailure { log.error(it) { "Failed to remove the tap: ${it.message}" } }
-        audioEngine.reset()
+        runCatching { KodioEngineReset(audioEngine).throwIfRaised() }
+            .onFailure { log.error(it) { "Failed to reset the engine: ${it.message}" } }
         log.info { "cleanup() complete" }
     }
 
@@ -148,7 +151,7 @@ abstract class AVAudioRecordingSession(
         // engine prepared and the tap installed, so resume is cheap.
         if (audioEngine.isRunning()) {
             log.info { "pauseRecording(): pausing AVAudioEngine" }
-            audioEngine.pause()
+            KodioEnginePause(audioEngine).throwIfRaised()
         }
     }
 

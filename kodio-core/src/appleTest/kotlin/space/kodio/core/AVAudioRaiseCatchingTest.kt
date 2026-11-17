@@ -9,6 +9,8 @@ import platform.AVFAudio.AVAudioPlayerNode
 import space.kodio.core.objc.KodioEngineAttachNode
 import space.kodio.core.objc.KodioEngineConnect
 import space.kodio.core.objc.KodioEngineMainMixerNode
+import space.kodio.core.objc.KodioEnginePause
+import space.kodio.core.objc.KodioEngineReset
 import space.kodio.core.objc.KodioPlayerNodeScheduleBuffer
 import space.kodio.core.objc.KodioPlayerNodePlay
 import space.kodio.core.objc.KodioRaise
@@ -68,6 +70,14 @@ internal class AVAudioRaiseCatchingTest {
 
         // What comes back is checked only for not ending the process: AVFAudio is free to accept this.
         KodioEngineAttachNode(AVAudioEngine(), player)
+    }
+
+    @Test
+    fun `an engine pauses and resets through the shim`() {
+        val engine = AVAudioEngine()
+
+        assertNull(KodioEnginePause(engine))
+        assertNull(KodioEngineReset(engine))
     }
 
     private companion object {
