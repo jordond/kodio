@@ -18,9 +18,20 @@ import kotlin.time.Duration.Companion.milliseconds
 import javax.sound.sampled.AudioFormat as JavaSoundAudioFormat
 import javax.sound.sampled.AudioSystem as JavaSoundAudioSystem
 
+/** Plays a loaded encoded file outside the native session. A seam for tests. */
+internal interface JvmEncodedPlaybackBackend {
+    fun load(encodedAudio: EncodedAudio): kotlin.time.Duration?
+    suspend fun playBlocking(startPosition: kotlin.time.Duration)
+    fun pause()
+    fun resume()
+    fun setPlaybackSpeed(speed: Float)
+    fun stop()
+    fun release()
+}
+
 internal class JvmMp3PlaybackBackend(
     private val device: AudioDevice.Output?,
-) {
+) : JvmEncodedPlaybackBackend {
     private val paused = MutableStateFlow(false)
     private val stopRequested = AtomicBoolean(false)
 
@@ -28,7 +39,7 @@ internal class JvmMp3PlaybackBackend(
     private var line: SourceDataLine? = null
     private var playbackSpeed: Float = AudioPlaybackSession.DEFAULT_PLAYBACK_SPEED
 
-    fun load(encodedAudio: EncodedAudio): kotlin.time.Duration? {
+    override fun load(encodedAudio: EncodedAudio): kotlin.time.Duration? {
         if (encodedAudio.fileFormat !is AudioFileFormat.Mp3) {
             throw AudioFileReadError.UnsupportedFormat(
                 "Direct playback is only implemented for MP3 on JVM targets."
@@ -40,7 +51,7 @@ internal class JvmMp3PlaybackBackend(
         return duration
     }
 
-    suspend fun playBlocking(startPosition: kotlin.time.Duration) {
+    override suspend fun playBlocking(startPosition: kotlin.time.Duration) {
         val audio = encodedAudio ?: return
         stopRequested.set(false)
         paused.value = false
@@ -79,21 +90,21 @@ internal class JvmMp3PlaybackBackend(
         }
     }
 
-    fun pause() {
+    override fun pause() {
         paused.value = true
         line?.stop()
     }
 
-    fun resume() {
+    override fun resume() {
         paused.value = false
         line?.start()
     }
 
-    fun setPlaybackSpeed(speed: Float) {
+    override fun setPlaybackSpeed(speed: Float) {
         playbackSpeed = speed
     }
 
-    fun stop() {
+    override fun stop() {
         stopRequested.set(true)
         paused.value = false
         line?.stop()
@@ -101,7 +112,7 @@ internal class JvmMp3PlaybackBackend(
         closeLine()
     }
 
-    fun release() {
+    override fun release() {
         stop()
         encodedAudio = null
     }

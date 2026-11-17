@@ -2,6 +2,7 @@ package space.kodio.core
 
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -40,6 +41,8 @@ private val logger = namedLogger("NativeMacosPlayback")
 internal class NativeMacosAudioPlaybackSession(
     private val nativeMemSeq: MemorySegment,
     requestedDevice: AudioDevice.Output?,
+    private val mp3Backend: JvmEncodedPlaybackBackend = JvmMp3PlaybackBackend(requestedDevice),
+    completionDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AudioPlaybackSession {
 
     private val _state = MutableStateFlow<AudioPlaybackSession.State>(AudioPlaybackSession.State.Idle)
@@ -71,8 +74,7 @@ internal class NativeMacosAudioPlaybackSession(
     private var positionJob: Job? = null
     private var positionStartedAt: TimeSource.Monotonic.ValueTimeMark? = null
     private var positionAtStart: Duration = Duration.ZERO
-    private val completionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val mp3Backend = JvmMp3PlaybackBackend(requestedDevice)
+    private val completionScope = CoroutineScope(completionDispatcher + SupervisorJob())
 
     override suspend fun load(audioFlow: AudioFlow) {
         stopPositionTracking(updatePosition = false)
@@ -178,6 +180,7 @@ internal class NativeMacosAudioPlaybackSession(
     }
 
     override suspend fun play() {
+        resumeShouldPlayFromSeek = false
         val encodedAudio = _encodedAudio.value
         if (encodedAudio != null) {
             playEncoded(encodedAudio)
@@ -240,12 +243,15 @@ internal class NativeMacosAudioPlaybackSession(
 
             _position.value = targetPosition
             val duration = _duration.value
-            if (wasPlaying && (duration == null || targetPosition < duration)) {
+            val reachedEnd = duration != null && targetPosition >= duration
+            if (wasPlaying && !reachedEnd) {
                 _state.value = AudioPlaybackSession.State.Ready
                 play()
             } else {
+                // The seek stopped the backend, so there is nothing left to resume: play again.
+                if (wasPaused && !reachedEnd) resumeShouldPlayFromSeek = true
                 _state.value = when {
-                    duration != null && targetPosition >= duration -> AudioPlaybackSession.State.Finished
+                    reachedEnd -> AudioPlaybackSession.State.Finished
                     wasPaused -> AudioPlaybackSession.State.Paused
                     else -> AudioPlaybackSession.State.Ready
                 }
@@ -313,15 +319,15 @@ internal class NativeMacosAudioPlaybackSession(
 
     override fun resume() {
         if (_state.value !is AudioPlaybackSession.State.Paused) return
+        if (resumeShouldPlayFromSeek) {
+            resumeShouldPlayFromSeek = false
+            completionScope.launch { play() }
+            return
+        }
         if (_encodedAudio.value != null) {
             mp3Backend.resume()
             _state.value = AudioPlaybackSession.State.Playing
             startPositionTracking(_position.value)
-            return
-        }
-        if (resumeShouldPlayFromSeek) {
-            resumeShouldPlayFromSeek = false
-            completionScope.launch { play() }
             return
         }
         NativeMacosLib.macos_playback_session_resume.invokeExact(nativeMemSeq)
