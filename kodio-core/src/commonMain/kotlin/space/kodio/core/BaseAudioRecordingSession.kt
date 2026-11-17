@@ -34,6 +34,13 @@ abstract class BaseAudioRecordingSession : AudioRecordingSession {
     private var recordingAudioFormat: AudioFormat? = null
 
     /**
+     * Authoritative buffer for the finished (cold) flow. The hot flow is
+     * bounded and live-only (replay = 0) so late subscribers do not receive
+     * the full recording history.
+     */
+    private val recordedChunks = mutableListOf<ByteArray>()
+
+    /**
      * Pause latch. While `true`, [awaitNotPaused] suspends; flipped back to
      * `false` by [resume]. Reset on [stop] / [reset].
      */
@@ -63,13 +70,14 @@ abstract class BaseAudioRecordingSession : AudioRecordingSession {
 
         try {
             _audioFlow.value = null // Clear previous flow
+            recordedChunks.clear()
 
             val format = prepareRecording()
             recordingAudioFormat = format
             logger.debug { "Prepared recording with format: $format" }
 
-            // 1. Create a hot flow for live data, caching all values for later.
-            val hotSource = MutableSharedFlow<ByteArray>(replay = Int.MAX_VALUE)
+            // 1. Create a hot flow for live data (bounded; full history in recordedChunks).
+            val hotSource = MutableSharedFlow<ByteArray>(replay = 0, extraBufferCapacity = 64)
             this.hotFlowSource = hotSource
             logger.debug { "Created hotSource SharedFlow: ${hotSource.hashCode()}" }
 
@@ -83,9 +91,9 @@ abstract class BaseAudioRecordingSession : AudioRecordingSession {
             launchRecordingJob(hotSource)
         } catch (e: Exception) {
             logger.error(e) { "Error in start(): ${e.message}" }
-            e.printStackTrace()
             _state.value = State.Error(e)
             cleanupRecording()
+            throw e
         }
     }
 
@@ -161,9 +169,9 @@ abstract class BaseAudioRecordingSession : AudioRecordingSession {
             platformFlow.collect { chunk ->
                 emitCount++
                 if (emitCount <= 3 || emitCount % 50 == 0) {
-                    val nonZero = chunk.count { it != 0.toByte() }
-                    logger.debug { "Emitting chunk #$emitCount to hotSource: size=${chunk.size}, nonZeroBytes=$nonZero" }
+                    logger.debug { "Emitting chunk #$emitCount to hotSource: size=${chunk.size}" }
                 }
+                recordedChunks.add(chunk)
                 hotSource.emit(chunk)
             }
             logger.debug { "Recording job finished, emitted $emitCount chunks" }
@@ -187,17 +195,14 @@ abstract class BaseAudioRecordingSession : AudioRecordingSession {
             // 1. Stop the recording job. This triggers onCleanup() via awaitClose.
             cleanupRecording()
 
-            // 2. Get the recorded data from the hot flow's replay cache.
-            val recordedChunks = hotFlowSource?.replayCache
+            // 2. Get the recorded data from the accumulator.
+            val captured = recordedChunks.toList()
             val format = recordingAudioFormat
-            logger.debug { "Recorded ${recordedChunks?.size ?: 0} chunks" }
+            logger.debug { "Recorded ${captured.size} chunks" }
 
-            if (recordedChunks != null && format != null) {
-                val totalNonZero = recordedChunks.sumOf { chunk -> chunk.count { it != 0.toByte() } }
-                logger.debug { "Total non-zero bytes in recording: $totalNonZero" }
-                
+            if (captured.isNotEmpty() && format != null) {
                 // 3. Create a new COLD, replayable flow from the captured data.
-                val coldFlow = AudioFlow(format, recordedChunks.asFlow())
+                val coldFlow = AudioFlow(format, captured.asFlow())
 
                 // 4. Update the public audioFlow to the new cold flow.
                 _audioFlow.value = coldFlow
@@ -221,6 +226,7 @@ abstract class BaseAudioRecordingSession : AudioRecordingSession {
         _state.value = State.Idle
         hotFlowSource = null
         recordingAudioFormat = null
+        recordedChunks.clear()
     }
 
     private fun cleanupRecording() {

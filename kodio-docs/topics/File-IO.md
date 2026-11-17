@@ -7,16 +7,18 @@
 <p><b>Save and load audio files</b> with <code>recording.saveAs()</code> and <code>AudioRecording.fromFile()</code> / <code>fromBytes()</code> / <code>fromSource()</code>.</p>
 </tldr>
 
-Kodio supports reading and writing audio files in common container formats. The API is designed to work across all Kotlin Multiplatform targets, including platforms without filesystem access.
+Kodio supports reading and writing audio files in common container formats. The API works across all Kotlin Multiplatform targets, including platforms without filesystem access.
 
 ## Supported formats {id="formats"}
 
 | Format | Read | Write | Extensions |
 |--------|------|-------|------------|
 | WAV    | PCM int (8/16/24/32-bit), IEEE float (32/64-bit) | PCM int, IEEE float | `.wav`, `.wave` |
-| AIFF   | PCM int | PCM int | `.aiff`, `.aif` |
-| AU     | PCM int, IEEE float | PCM int, IEEE float | `.au`, `.snd` |
+| AIFF   | PCM int (8/16/24/32-bit), IEEE float (32/64-bit) | PCM int, IEEE float | `.aiff`, `.aif` |
+| AU     | PCM int (8/16/24/32-bit), IEEE float (32/64-bit) | PCM int, IEEE float | `.au`, `.snd` |
 | MP3    | Direct native playback via `EncodedAudio` | Not supported | `.mp3` |
+
+Specify the format with `AudioFileFormat.Wav`, `AudioFileFormat.Aiff`, or `AudioFileFormat.Au`.
 
 > `AudioRecording.fromBytes()` / `fromFile()` decode file containers into Kodio PCM recordings. MP3 is handled as encoded audio for direct playback instead of PCM recording import.
 >
@@ -24,10 +26,17 @@ Kodio supports reading and writing audio files in common container formats. The 
 
 ## Saving recordings {id="saving"}
 
-Save a recording to a WAV file on disk:
+Save a recording to disk. The default format is WAV:
 
 ```kotlin
 recording.saveAs(Path("my-recording.wav"))
+```
+
+Save as AIFF or AU:
+
+```kotlin
+recording.saveAs(Path("my-recording.aiff"), fileFormat = AudioFileFormat.Aiff)
+recording.saveAs(Path("my-recording.au"), fileFormat = AudioFileFormat.Au)
 ```
 
 For more control over the output, use the `AudioFlow` extensions:
@@ -35,9 +44,10 @@ For more control over the output, use the `AudioFlow` extensions:
 ```kotlin
 // Write to a file
 audioFlow.writeToFile(AudioFileFormat.Wav, Path("output.wav"))
+audioFlow.writeToFile(AudioFileFormat.Aiff, Path("output.aiff"))
 
 // Write to any kotlinx.io Sink
-audioFlow.writeToSink(AudioFileFormat.Wav, sink)
+audioFlow.writeToSink(AudioFileFormat.Au, sink)
 
 // Collect into an in-memory Buffer
 val buffer = audioFlow.collectAsBuffer(AudioFileFormat.Wav)
@@ -45,16 +55,22 @@ val buffer = audioFlow.collectAsBuffer(AudioFileFormat.Wav)
 
 ## Loading audio files {id="loading"}
 
-Kodio provides three ways to load audio files, covering every KMP platform.
+Kodio provides three ways to load audio files, for all KMP platforms.
 
 ### From Compose resources or byte arrays {id="from-bytes"}
 
 Use `fromBytes()` to load audio from Compose Multiplatform resources, network responses, or any in-memory byte array:
 
 ```kotlin
-// Compose resource
+// Compose resource (WAV)
 val recording = AudioRecording.fromBytes(
     Res.readBytes("files/notification.wav")
+)
+
+// AIFF from bytes
+val aiffRecording = AudioRecording.fromBytes(
+    bytes = aiffData,
+    fileFormat = AudioFileFormat.Aiff
 )
 
 // Network response
@@ -69,7 +85,9 @@ This works on **all platforms**, including web and sandboxed mobile environments
 Use `fromFile()` for direct filesystem access. The format is auto-detected from the file extension:
 
 ```kotlin
-val recording = AudioRecording.fromFile(Path("recording.wav"))
+val wavRecording = AudioRecording.fromFile(Path("recording.wav"))
+val aiffRecording = AudioRecording.fromFile(Path("recording.aiff"))
+val auRecording = AudioRecording.fromFile(Path("recording.au"))
 ```
 
 > Filesystem access is available on JVM, macOS, and iOS native targets. For Android and web, prefer `fromBytes()` or `fromSource()`.
@@ -85,14 +103,14 @@ Use `fromSource()` to load from any `kotlinx.io.Source`, such as an Android `Con
 val source = contentResolver.openInputStream(uri)!!
     .asSource()
     .buffered()
-val recording = AudioRecording.fromSource(source)
+val recording = AudioRecording.fromSource(source, AudioFileFormat.Wav)
 ```
 
 All three methods accept an optional `AudioFileFormat` parameter (defaults to `Wav`):
 
 ```kotlin
 // Explicit format
-val recording = AudioRecording.fromBytes(data, AudioFileFormat.Wav)
+val recording = AudioRecording.fromBytes(data, AudioFileFormat.Aiff)
 ```
 
 ## Playing MP3 files {id="mp3"}
@@ -133,10 +151,10 @@ Direct MP3 playback is available on Android, iOS, macOS, JVM desktop, JS, and Wa
 Loading can throw the following errors:
 
 `AudioFileReadError.InvalidFile`
-: The data is not a valid audio file (e.g. missing RIFF/WAVE header, corrupt structure).
+: The data is not a valid audio file (for example missing header or corrupt structure).
 
 `AudioFileReadError.UnsupportedFormat`
-: The file uses an encoding Kodio doesn't support (e.g. compressed ADPCM).
+: The file uses an encoding Kodio doesn't support (for example compressed ADPCM).
 
 `AudioFileReadError.IO`
 : A filesystem-level error occurred while reading.
@@ -158,7 +176,7 @@ try {
 Saving can throw the following errors:
 
 `AudioFileWriteError.UnsupportedFormat`
-: The audio format cannot be written to the target container (e.g. planar layout to WAV).
+: The audio format cannot be written to the target container (for example planar layout to WAV).
 
 `AudioFileWriteError.IO`
 : A filesystem-level error occurred while writing.

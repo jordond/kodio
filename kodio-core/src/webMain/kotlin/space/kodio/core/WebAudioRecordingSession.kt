@@ -2,6 +2,7 @@ package space.kodio.core
 
 import js.typedarrays.Float32Array
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import web.audio.*
 import web.events.EventHandler
@@ -9,7 +10,10 @@ import web.mediadevices.getUserMedia
 import web.mediastreams.MediaStream
 import web.messaging.MessageEvent
 import web.navigator.navigator
+import space.kodio.core.util.namedLogger
 import web.worklets.addModule
+
+private val logger = namedLogger("WebRecording")
 
 class WebAudioRecordingSession(
     private val device: AudioDevice.Input?,
@@ -39,8 +43,8 @@ class WebAudioRecordingSession(
         val settings = inputTrack.getSettings()
         val actualSampleRate = settings.sampleRate ?: format.sampleRate
 
-        println("[WebRecording] Requested: rate=${format.sampleRate}, channels=${format.channels.count}, sampleSize=${format.bytesPerSample * 8}")
-        println("[WebRecording] Track settings: rate=${settings.sampleRate}, channels=${settings.channelCount}")
+        logger.debug { "Requested: rate=${format.sampleRate}, channels=${format.channels.count}, sampleSize=${format.bytesPerSample * 8}" }
+        logger.debug { "Track settings: rate=${settings.sampleRate}, channels=${settings.channelCount}" }
 
         val finalFormat = AudioFormat(
             sampleRate = actualSampleRate,
@@ -55,7 +59,7 @@ class WebAudioRecordingSession(
         )
         audioContext = context
 
-        println("[WebRecording] AudioContext sampleRate=${context.sampleRate}, finalFormat=$finalFormat")
+        logger.debug { "AudioContext sampleRate=${context.sampleRate}, finalFormat=$finalFormat" }
 
         context.audioWorklet.addModule(blobUrl)
         return finalFormat
@@ -74,19 +78,15 @@ class WebAudioRecordingSession(
                 val pcmData = (event as MessageEvent).data as Float32Array<*>
                 chunkCount++
                 if (chunkCount <= 5 || chunkCount % 200 == 0) {
-                    var min = Float.MAX_VALUE
-                    var max = Float.MIN_VALUE
-                    for (i in 0 until pcmData.length) {
-                        val v = pcmData[i].toString().toFloat()
-                        if (v < min) min = v
-                        if (v > max) max = v
-                    }
-                    println("[WebRecording] Chunk #$chunkCount: samples=${pcmData.length}, range=[$min, $max]")
+                    logger.debug { "Chunk #$chunkCount: samples=${pcmData.length}" }
                 }
                 val byteData = pcmData.encodeAs16BitPcmByteArray()
-                channel.trySend(byteData)
+                val sendResult = channel.trySend(byteData)
+                if (sendResult.isFailure) {
+                    logger.warn { "Failed to emit ${byteData.size} bytes" }
+                }
             } catch (e: Throwable) {
-                e.printStackTrace()
+                logger.error(e) { "Worklet message handling failed" }
             }
         }
         this.audioWorkletNode = workletNode
@@ -97,10 +97,17 @@ class WebAudioRecordingSession(
 
     override fun cleanup() {
         mediaStreamSource?.disconnect()
-        audioWorkletNode?.disconnect()
-        audioWorkletNode?.port?.close() // Close the message port
-        mediaStream?.getTracks()?.toList()?.forEach { it.stop() }
-        scope.launch { audioContext?.close() }
+        val node = audioWorkletNode
+        val stream = mediaStream
+        val context = audioContext
+        node?.port?.postMessage(createWorkletFlushMessage())
+        scope.launch {
+            delay(50)
+            node?.disconnect()
+            node?.port?.close()
+            stream?.getTracks()?.toList()?.forEach { it.stop() }
+            context?.close()
+        }
         audioContext = null
         mediaStream = null
         mediaStreamSource = null

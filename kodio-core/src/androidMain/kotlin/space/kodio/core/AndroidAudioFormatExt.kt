@@ -5,17 +5,13 @@ import android.media.AudioFormat as AndroidAudioFormat
 
 /* ---------------- Defaults ---------------- */
 
-val DefaultAndroidRecordingAudioFormat = AudioFormat(
-    sampleRate = 48000,
-    channels = Channels.Mono,
-    encoding = SampleEncoding.PcmInt(
-        bitDepth = IntBitDepth.Sixteen,
-        endianness = Endianness.Little,
-        layout = SampleLayout.Interleaved,
-        signed = true,
-        packed = true
-    )
-)
+/**
+ * Platform default recording format on Android: 48 kHz, mono, signed 16-bit
+ * little-endian interleaved PCM (same as [DefaultRecordingInt16]).
+ *
+ * Used when [AudioRecordingSession] is created without an explicit format.
+ */
+val DefaultAndroidRecordingAudioFormat = DefaultRecordingInt16
 
 /* ---------------- Channel masks ---------------- */
 

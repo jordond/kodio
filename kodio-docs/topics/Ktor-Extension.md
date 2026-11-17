@@ -6,22 +6,19 @@
 <tldr>
 <p><b>Push or pull live audio over the network</b> using the
 <code>kodio-extensions:ktor</code> module. Works on JVM, Android, iOS, macOS,
-JS and WasmJS — anywhere Ktor's client runs.</p>
+JS and WasmJS, anywhere Ktor's client runs.</p>
 </tldr>
 
-The Ktor extension adds tiny adapters between Kodio's `AudioFlow` and Ktor's
-WebSocket / Server-Sent-Events plumbing so you can stream live mic capture to
-a backend (or pull a remote stream into a `Player`) without reinventing the
-framing.
+The Ktor extension adds adapters between Kodio's `AudioFlow` and Ktor's WebSocket plumbing so you can stream live mic capture to a backend (or pull a remote stream into a `Player`) without reinventing the framing.
 
 ## Wire format {id="wire-format"}
 
 The protocol is intentionally minimal:
 
-1. **Format header** — the [`AudioFormat`](Audio-Format.md) is encoded with
+1. **Format header**: the [`AudioFormat`](Audio-Format.md) is encoded with
    `AudioFormat.encodeToByteArray()`, prefixed with the four ASCII bytes
    `KDIO`, and sent as the first binary frame.
-2. **Chunks** — every subsequent binary frame is one raw PCM byte chunk in
+2. **Chunks**: every subsequent binary frame is one raw PCM byte chunk in
    the declared format.
 
 The constants live in `AudioFlowWireFormat`.
@@ -40,8 +37,9 @@ recorder.stop()
 client.close()
 ```
 
-`AudioFlow.sendOverWebSocket` opens the socket, sends the format header,
-forwards every chunk as a binary frame, and closes cleanly.
+`AudioFlow.sendOverWebSocket` opens the socket, sends the format header, forwards every chunk as a binary frame, and closes cleanly.
+
+For an already-open session, use `AudioFlow.sendInto(session)`.
 
 ## Receive an AudioFlow on the server {id="receive-server"}
 
@@ -54,26 +52,38 @@ embeddedServer(CIO, port = 8080) {
         webSocket("/api/audio") {
             val flow = receiveAudioFlow()
             println("Receiving ${flow.format}")
-            flow.collect { chunk -> /* persist, transcribe, … */ }
+            flow.collect { chunk -> /* persist, transcribe, ... */ }
         }
     }
 }.start(wait = true)
 ```
 
-Or call `WebSocketSession.receiveAudioFlow()` from any custom handler that
-already manages the session lifecycle.
+`WebSocketSession.receiveAudioFlow()` is for server-side handlers that already manage the session lifecycle.
 
 ## Pull an AudioFlow from a server {id="pull-client"}
 
-Symmetrically, fetch a server-pushed `AudioFlow` into a Kodio `Player`:
+Fetch a server-pushed `AudioFlow` and play it:
 
 ```kotlin
 val client = HttpClient(CIO) { install(WebSockets) }
 val flow = client.receiveAudioFlowFromWebSocket("wss://my-app.example.com/api/audio/play")
 
-Kodio.play { player ->
-    player.load(AudioRecording.fromAudioFlow(flow))
+Kodio.play(flow)
+```
+
+To collect the stream into a recording first:
+
+```kotlin
+val recording = AudioRecording.fromAudioFlow(flow)
+Kodio.play(recording)
+```
+
+Or use the block overload for manual control:
+
+```kotlin
+Kodio.play(recording) { player ->
     player.start()
+    player.awaitComplete()
 }
 ```
 
@@ -81,7 +91,7 @@ Kodio.play { player ->
 
 The current release ships WebSocket support only. SSE-based delivery (for
 environments where WebSockets are blocked) is planned as a follow-up and will
-re-use the same `KDIO`-prefixed header — track [GitHub issue #6](https://github.com/dosier/kodio/issues/6)
+re-use the same `KDIO`-prefixed header. Track [GitHub issue #6](https://github.com/dosier/kodio/issues/6)
 for status.
 
 ## Maven coordinates {id="install"}
@@ -93,5 +103,5 @@ dependencies {
 ```
 
 This module declares `kodio-core`, `ktor-client-core`, and
-`ktor-client-websockets` as `api` dependencies — bring your own engine
-(`ktor-client-cio`, `ktor-client-darwin`, `ktor-client-js`, …).
+`ktor-client-websockets` as `api` dependencies. Bring your own engine
+(`ktor-client-cio`, `ktor-client-darwin`, `ktor-client-js`, and so on).

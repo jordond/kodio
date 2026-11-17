@@ -13,10 +13,10 @@ Kodio provides predefined quality presets optimized for common recording scenari
 
 | Preset | Sample Rate | Channels | Bit Depth | Best For |
 |--------|-------------|----------|-----------|----------|
-| 🎤 `Voice` | 16 kHz | Mono | 16-bit | Speech, voice memos, transcription |
-| 🎵 `Standard` | 44.1 kHz | Mono | 16-bit | General audio, podcasts (default) |
-| 🎧 `High` | 48 kHz | Stereo | 16-bit | Music, professional content |
-| 🎚️ `Lossless` | 96 kHz | Stereo | 24-bit | Studio recording, archival |
+| `Voice` | 16 kHz | Mono | 16-bit | Speech, voice memos, transcription |
+| `Standard` | 44.1 kHz | Mono | 16-bit | General audio, podcasts (default) |
+| `High` | 48 kHz | Stereo | 16-bit | Music, professional content |
+| `Lossless` | 96 kHz | Stereo | 24-bit | Studio recording, archival |
 
 ## Usage {id="usage"}
 
@@ -59,19 +59,19 @@ val recorderState = rememberRecorderState(
 ## Choosing a preset {id="choosing"}
 
 <deflist type="medium">
-<def title="🎤 Voice">
+<def title="Voice">
 <p><b>When to use</b>: Voice memos, speech-to-text input, phone calls, podcasts with speech only.</p>
 <p><b>Trade-off</b>: Smallest files, optimized for speech frequencies (human voice range). Not suitable for music.</p>
 </def>
-<def title="🎵 Standard">
+<def title="Standard">
 <p><b>When to use</b>: General-purpose recording, mixed content, compatibility with most playback systems.</p>
 <p><b>Trade-off</b>: CD-quality sample rate (44.1 kHz), good balance of quality and file size. Default if not specified.</p>
 </def>
-<def title="🎧 High">
+<def title="High">
 <p><b>When to use</b>: Music recording, professional podcasts, content for distribution.</p>
 <p><b>Trade-off</b>: Stereo capture, higher sample rate. Larger files than Standard.</p>
 </def>
-<def title="🎚️ Lossless">
+<def title="Lossless">
 <p><b>When to use</b>: Studio recording, archival, post-processing workflows.</p>
 <p><b>Trade-off</b>: Maximum quality, largest files (~35 MB/minute). Overkill for most applications.</p>
 </def>
@@ -94,17 +94,21 @@ Approximate sizes for uncompressed WAV files:
 
 ## Platform negotiation {id="negotiation"}
 
-Quality presets are forwarded to the platform's audio system as a *request*. If the exact format isn't supported, the platform gracefully falls back to the closest supported format:
+Quality presets are forwarded to the platform's audio system as a *request*. If the exact format isn't supported, the platform falls back to the closest supported format:
 
 | Platform | Negotiation behavior |
 |----------|---------------------|
-| Android | Tries the requested format first, falls back to 48 kHz/mono/16-bit if `AudioRecord` rejects it |
+| Android | Tries the requested format first; 24-bit PCM requires API 31+. Falls back to the default recording format (48 kHz/mono/16-bit) if `AudioRecord` rejects the request |
 | JVM (JavaSound) | Checks mixer support, falls back to the device's default format |
 | macOS (CoreAudio) | Tries AudioQueue with the requested format, falls back through device default and platform default |
 | iOS (AVAudioEngine) | Converts from hardware format; falls back to 48 kHz/mono/16-bit if the target format isn't representable in AVAudioFormat (e.g., 24-bit int) |
 | Web (AudioWorklet) | Sample rate is a hint to `getUserMedia`; output is always mono 16-bit PCM due to worklet constraints |
 
 After recording starts, `Recorder.format` returns the actual negotiated format, which you can compare against the requested `quality.format`.
+
+> On Android, 24-bit recording (including the `Lossless` preset) requires Android 12 (API 31) or newer. On older devices or when the requested format is unsupported, Kodio falls back to the default recording format automatically instead of throwing.
+>
+{style="note"}
 
 > If your application depends on a specific format (e.g., 16 kHz for speech recognition), check `recorder.format` after starting to confirm the platform honored it.
 >

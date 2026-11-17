@@ -1,5 +1,5 @@
 [![Maven Central](https://img.shields.io/maven-central/v/dev.jordond.kodio/core?style=flat&logo=apachemaven&logoColor=white&label=Maven%20Central)](https://central.sonatype.com/artifact/dev.jordond.kodio/core)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.2.20-7F52FF?style=flat&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.4.0-7F52FF?style=flat&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat)](LICENSE)
 [![Docs](https://img.shields.io/badge/Docs-GitHub%20Pages-4285F4?style=flat&logo=gitbook&logoColor=white)](https://dosier.github.io/kodio/)
 
@@ -15,18 +15,19 @@
 
 # Kodio
 
-**Kotlin Multiplatform Audio Library** — Recording, playback, and transcription with a modern coroutines-based API.
+**Kotlin Multiplatform Audio Library** for recording, playback, and transcription with a coroutines-based API.
 
 ## Features
 
-- **Simple Recording** — One-line recording with quality presets
-- **Easy Playback** — Play recordings with a single method call
-- **Multiplatform** — JVM, Android, iOS, macOS, JS, Wasm
-- **Compose Integration** — Ready-to-use state holders and UI components
-- **Live Waveforms** — Real-time amplitude data for visualizations
-- **Permission Handling** — Built-in permission management
-- **File I/O** — Save/load WAV files easily
-- **Transcription** — Speech-to-text via OpenAI Whisper API
+- **Recording**: One-line recording with quality presets
+- **Playback**: Play recordings with a single method call
+- **Multiplatform**: JVM, Android, iOS, macOS, JS, Wasm
+- **Compose Integration**: State holders and UI components
+- **Live Waveforms**: Real-time amplitude data for visualizations
+- **Permission Handling**: Built-in permission management
+- **File I/O**: Save and load WAV files
+- **Transcription**: Speech-to-text via OpenAI Whisper API
+- **Ktor Extension**: WebSocket streaming of `AudioFlow`
 
 ## Quick Start
 
@@ -51,29 +52,79 @@ suspend fun main() {
 ```kotlin
 dependencies {
     // Core library (required)
-    implementation("dev.jordond.kodio:core:0.1.5-jordond.1")
+    implementation("dev.jordond.kodio:core:0.2.0-jordond.1")
     
     // Optional: Compose state holders and waveform
-    implementation("dev.jordond.kodio.extensions:compose:0.1.5-jordond.1")
+    implementation("dev.jordond.kodio.extensions:compose:0.2.0-jordond.1")
     
     // Optional: Material 3 UI components
-    implementation("dev.jordond.kodio.extensions:compose-material3:0.1.5-jordond.1")
+    implementation("dev.jordond.kodio.extensions:compose-material3:0.2.0-jordond.1")
     
     // Optional: Audio transcription (OpenAI Whisper)
-    implementation("dev.jordond.kodio.extensions:transcription:0.1.5-jordond.1")
+    implementation("dev.jordond.kodio.extensions:transcription:0.2.0-jordond.1")
+    
+    // Optional: Ktor WebSocket streaming of AudioFlow
+    implementation("dev.jordond.kodio.extensions:ktor:0.2.0-jordond.1")
 }
 ```
 
+## Platform Notes
+
+The JVM target runs on Linux, macOS, and Windows via JavaSound. On macOS, an optional native CoreAudio path is available. On Windows, only the JavaSound path is supported; native macOS libraries are not bundled for Windows hosts.
+
+## Logging
+
+Kodio is **silent by default**: no log output is produced until you configure it. Consumers decide when and where logs appear, rather than Kodio printing to the console unprompted.
+
+Enable logging at application startup with the built-in platform console writer:
+
+```kotlin
+import space.kodio.core.Kodio
+import space.kodio.core.logging.LogLevel
+import space.kodio.core.logging.platformLogWriter
+
+Kodio.configureLogging {
+    minLevel = LogLevel.Debug
+    addWriter(platformLogWriter())
+}
+```
+
+`platformLogWriter()` routes to Logcat on Android, NSLog on Apple platforms, the browser console on JS/Wasm, and stdout/stderr on JVM. The same API works across all targets.
+
+To stay silent (the default), do nothing, or explicitly disable:
+
+```kotlin
+Kodio.configureLogging { minLevel = LogLevel.None }
+```
+
+Bridge to your own logging backend (Kermit, SLF4J, Crashlytics, etc.) by implementing `KodioLogWriter`:
+
+```kotlin
+Kodio.configureLogging {
+    minLevel = LogLevel.Warn
+    addWriter { level, tag, message, throwable ->
+        MyLogger.log(level.name, tag, message, throwable)
+    }
+}
+```
+
+**Log levels:** `Trace`, `Debug`, `Info`, `Warn`, `Error`, `None`. Messages at or above `minLevel` are forwarded to all registered writers.
+
+See the [Logging](https://dosier.github.io/kodio/logging.html) docs page for full details.
+
 ## Documentation
 
-📚 **[dosier.github.io/kodio](https://dosier.github.io/kodio/)**
+**[dosier.github.io/kodio](https://dosier.github.io/kodio/)**
 
+- [API Reference (KDoc)](https://dosier.github.io/kodio/api/)
 - [Getting Started](https://dosier.github.io/kodio/getting-started.html)
 - [Installation](https://dosier.github.io/kodio/installation.html)
 - [Platform Setup](https://dosier.github.io/kodio/platform-setup.html)
 - [Recording](https://dosier.github.io/kodio/recording.html)
 - [Playback](https://dosier.github.io/kodio/playback.html)
 - [Compose Integration](https://dosier.github.io/kodio/recorder-state.html)
+- [Ktor Extension](https://dosier.github.io/kodio/ktor-extension.html)
+- [Logging](https://dosier.github.io/kodio/logging.html)
 
 ## License
 

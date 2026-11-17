@@ -29,8 +29,6 @@ expect val microphonePermissionDescriptor: PermissionDescriptor
  */
 internal expect fun FloatArray.toJsFloat32Array(): Float32Array<ArrayBuffer>
 
-expect fun <T : JsAny?> JsArray<T>.toList(): List<T>
-
 expect fun createCodeBlobUrl(code: String): String
 expect fun <B : ArrayBufferLike> Float32Array<B>.encodeAs16BitPcmByteArray(): ByteArray
 
@@ -50,3 +48,8 @@ internal expect fun encodedAudioElementPlay(element: JsAny)
 internal expect fun encodedAudioElementPlayError(element: JsAny): String?
 internal expect fun encodedAudioElementPause(element: JsAny)
 internal expect fun encodedAudioElementStopAndRelease(element: JsAny)
+
+internal expect fun createWorkletFlushMessage(): JsAny
+
+fun <T : JsAny?> JsArray<T>.toList(): List<T> =
+    this.toArray().toList()

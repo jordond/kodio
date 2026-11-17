@@ -3,11 +3,11 @@ import org.jetbrains.kotlin.konan.target.KonanTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
+    id("kodio-dokka-convention")
 }
 
 kotlin {
     macosArm64()
-    macosX64()
     mingwX64()
 
     // Configure all native targets to build a shared library

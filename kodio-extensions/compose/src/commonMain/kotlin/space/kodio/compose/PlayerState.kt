@@ -8,13 +8,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import space.kodio.core.*
+import space.kodio.core.logging.kodioLogger
 import kotlin.time.Duration
+
+private val logger = kodioLogger("PlayerState")
 
 /**
  * State holder for audio playback in Compose.
  * 
  * Provides a simplified, reactive API for playing audio that integrates
- * seamlessly with Compose's state management.
+ * with Compose's state management.
  * 
  * ## Example Usage
  * ```kotlin
@@ -185,6 +188,7 @@ class PlayerState internal constructor(
             observePlayerPosition(player)
             observePlayerSpeed(player)
         } catch (e: Exception) {
+            logger.error(e) { "Error loading recording: ${e.message}" }
             stateMutex.withLock {
                 _error.value = AudioError.from(e)
                 _isLoading.value = false
@@ -215,6 +219,7 @@ class PlayerState internal constructor(
                 player.start()
             }
         } catch (e: Exception) {
+            logger.error(e) { "Error starting playback: ${e.message}" }
             _error.value = AudioError.from(e)
         }
     }

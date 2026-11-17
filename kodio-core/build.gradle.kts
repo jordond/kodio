@@ -7,8 +7,9 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.kotlinJsPlainObjects)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     id("kodio-publish-convention")
+    id("kodio-dokka-convention")
 }
 
 group = "dev.jordond.kodio"
@@ -20,19 +21,23 @@ kodioPublishing {
 
 kotlin {
     jvm()
-    jvmToolchain(21)
-    androidTarget {
-        publishLibraryVariants("release")
+    // JDK 22 finalized the Foreign Function and Memory API (JEP 454) used by the
+    // native macOS path. Building on 22+ compiles those calls as a final (non-preview)
+    // API. Consumers of the jvm artifact therefore need a Java 22+ runtime.
+    jvmToolchain(22)
+    androidLibrary {
+        namespace = "space.kodio.core"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
+        withHostTest {}
     }
-    iosX64()
     iosArm64()
     iosSimulatorArm64()
     listOf(
-        macosX64(),
         macosArm64()
     ).forEach { macosTarget ->
         macosTarget.binaries.executable {
@@ -60,7 +65,6 @@ kotlin {
             dependencies {
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.io)
-                implementation(libs.kotlin.logging)
                 api(libs.bignum)
             }
         }
@@ -75,21 +79,9 @@ kotlin {
                 implementation(libs.jlayer)
             }
         }
-        jvmTest {
-            dependencies {
-                implementation(libs.slf4j.simple)
-            }
-        }
         androidMain {
             dependencies {
                 implementation(libs.androidx.core.ktx)
-            }
-        }
-        // Android unit tests run on the host JVM and trigger kotlin-logging,
-        // which needs an SLF4J binding on its classpath. See GitHub issue #15.
-        val androidUnitTest by getting {
-            dependencies {
-                implementation(libs.slf4j.simple)
             }
         }
         @Suppress("unused")
@@ -98,18 +90,6 @@ kotlin {
                 implementation(libs.kotlin.browser.v202575)
             }
         }
-    }
-}
-
-android {
-    namespace = "space.kodio.core"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
     }
 }
 
@@ -127,9 +107,7 @@ val isWindowsHost = org.gradle.internal.os.OperatingSystem.current().isWindows
 tasks.named<Copy>("jvmProcessResources") {
     if (isMacOsHost) {
         dependsOn(
-            nativePermissionsProject.tasks.named("macosX64Binaries"),
             nativePermissionsProject.tasks.named("macosArm64Binaries"),
-            nativeProcessingProject.tasks.named("macosX64Binaries"),
             nativeProcessingProject.tasks.named("macosArm64Binaries"),
         )
     }
@@ -147,17 +125,9 @@ tasks.named<Copy>("jvmProcessResources") {
             include("libaudiopermissions.dylib")
             into("$nativeLibsDir/macos-aarch64")
         }
-        from(permissions("macosX64")) {
-            include("libaudiopermissions.dylib")
-            into("$nativeLibsDir/macos-x86-64")
-        }
         from(processing("macosArm64")) {
             include("libaudioprocessing.dylib")
             into("$nativeLibsDir/macos-aarch64")
-        }
-        from(processing("macosX64")) {
-            include("libaudioprocessing.dylib")
-            into("$nativeLibsDir/macos-x86-64")
         }
     }
     if (isWindowsHost) {

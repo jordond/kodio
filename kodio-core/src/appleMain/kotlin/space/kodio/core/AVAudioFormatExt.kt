@@ -5,11 +5,13 @@ import space.kodio.core.util.namedLogger
 
 private val log = namedLogger("AVAudioFormatExt")
 
-val DefaultAppleRecordingAudioFormat = AudioFormat(
-    sampleRate = 48000,
-    channels = Channels.Mono,
-    encoding = SampleEncoding.PcmInt(IntBitDepth.Sixteen, Endianness.Little, SampleLayout.Interleaved, signed = true)
-)
+/**
+ * Platform default recording format on Apple platforms: 48 kHz, mono, signed
+ * 16-bit little-endian interleaved PCM (same as [DefaultRecordingInt16]).
+ *
+ * Used when [AudioRecordingSession] is created without an explicit format.
+ */
+val DefaultAppleRecordingAudioFormat = DefaultRecordingInt16
 
 /**
  * Converts this common [AudioFormat] to an [AVAudioFormat] instance.

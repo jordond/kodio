@@ -4,7 +4,6 @@ package space.kodio.core
 
 import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.JsAny
-import kotlin.js.JsArray
 import js.buffer.ArrayBuffer
 import js.buffer.ArrayBufferLike
 import js.typedarrays.Float32Array
@@ -65,10 +64,6 @@ internal actual fun FloatArray.toJsFloat32Array(): Float32Array<ArrayBuffer> {
         out[i] = this[i]
     }
     return out
-}
-
-actual fun <T : JsAny?> JsArray<T>.toList(): List<T> {
-    return this.toArray().asList()
 }
 
 @Suppress("UNCHECKED_CAST_TO_EXTERNAL_INTERFACE")
@@ -144,3 +139,5 @@ internal actual fun encodedAudioElementStopAndRelease(element: JsAny) {
         """
     )
 }
+
+internal actual fun createWorkletFlushMessage(): JsAny = "flush"

@@ -204,11 +204,11 @@ class AudioRecording private constructor(
         other as AudioRecording
         if (format != other.format) return false
         if (sizeInBytes != other.sizeInBytes) return false
-        // Deep comparison of chunks would be expensive, skip for now
-        return true
+        return toByteArray().contentEquals(other.toByteArray())
     }
 
     override fun hashCode(): Int {
+        // Intentionally coarse: content is not hashed to keep hashCode cheap.
         var result = format.hashCode()
         result = 31 * result + sizeInBytes.hashCode()
         return result
@@ -263,10 +263,9 @@ class AudioRecording private constructor(
         }
 
         /**
-         * Stitches multiple recordings into a single contiguous [AudioRecording].
+         * Stitches multiple separately recorded segments into a single contiguous
+         * [AudioRecording].
          *
-         * This is the recommended workaround for "pause/resume" use cases until
-         * native pause/resume support lands (tracked by GitHub issue #24).
          * Record successive segments with separate `start()`/`stop()` cycles
          * (calling `reset()` in between), then concatenate the results:
          *

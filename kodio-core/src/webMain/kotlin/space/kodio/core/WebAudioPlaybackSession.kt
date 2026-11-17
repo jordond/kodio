@@ -23,7 +23,11 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * TODO: support output device selection when setSinkId becomes widely adapted (https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/setSinkId)
+ * Web playback session. Output device selection via [AudioContext.setSinkId] is
+ * deferred: the API is Chrome/Edge-only as of 2026 (unsupported in Firefox and
+ * Safari). Adding it would require feature-detected progressive enhancement and
+ * a device-passing API on the web playback path, which does not exist yet.
+ * [AudioError.DeviceSelectionUnsupported] remains the fallback behavior.
  */
 class WebAudioPlaybackSession() : BaseAudioPlaybackSession() {
 

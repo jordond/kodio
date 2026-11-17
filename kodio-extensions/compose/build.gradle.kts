@@ -6,11 +6,11 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
-    alias(libs.plugins.composeHotReload)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     id("kodio-publish-convention")
+    id("kodio-dokka-convention")
 }
 
 group = "dev.jordond.kodio.extensions"
@@ -22,18 +22,18 @@ kodioPublishing {
 
 kotlin {
     jvm()
-    androidTarget {
-        publishLibraryVariants("release")
+    androidLibrary {
+        namespace = "space.kodio.extensions.compose"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
     }
-    iosX64()
     iosArm64()
     iosSimulatorArm64()
 
-    macosX64()
     macosArm64()
 
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
@@ -56,8 +56,6 @@ kotlin {
             dependencies {
                 // Project Libraries
                 implementation(projects.kodio.kodioCore)
-                implementation(libs.bignum)
-                implementation(libs.kotlin.logging)
                 // Compose Libraries
                 implementation(compose.ui)
                 implementation(compose.foundation)
@@ -77,9 +75,6 @@ kotlin {
             dependencies {
                 // Skiko runtime needed for Compose UI tests on JVM
                 implementation(compose.desktop.currentOs)
-                // SLF4J binding for tests (otherwise kotlin-logging produces an
-                // ExceptionInInitializerError on Linux CI). See GitHub issue #15.
-                implementation(libs.slf4j.simple)
             }
         }
         androidMain {
@@ -93,18 +88,6 @@ kotlin {
                 implementation(libs.kotlin.browser.v202575)
             }
         }
-    }
-}
-
-android {
-    namespace = "space.kodio.extensions.compose"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
     }
 }
 
@@ -126,3 +109,16 @@ tasks.matching {
         it.name == "testDebugUnitTest" ||
         it.name == "testReleaseUnitTest"
 }.configureEach { enabled = false }
+
+// Compose ui-uikit (CMP 1.11) references iOS 26 SDK symbols (e.g. UIViewLayoutRegion)
+// that are unavailable in CI's Xcode toolchain, so linking the Apple test
+// binaries fails. These modules have no real Kotlin/Native tests (Compose UI
+// tests only run on the JVM target), so disable the Apple native test tasks.
+val appleNativeTestTaskNames = setOf(
+    "linkDebugTestMacosArm64",
+    "linkDebugTestIosArm64",
+    "linkDebugTestIosSimulatorArm64",
+    "macosArm64Test",
+    "iosSimulatorArm64Test",
+)
+tasks.matching { it.name in appleNativeTestTaskNames }.configureEach { enabled = false }

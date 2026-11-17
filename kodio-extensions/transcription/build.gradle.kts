@@ -6,9 +6,10 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     alias(libs.plugins.kotlinSerialization)
     id("kodio-publish-convention")
+    id("kodio-dokka-convention")
 }
 
 group = "dev.jordond.kodio.extensions"
@@ -20,18 +21,18 @@ kodioPublishing {
 
 kotlin {
     jvm()
-    androidTarget {
-        publishLibraryVariants("release")
+    androidLibrary {
+        namespace = "space.kodio.transcription"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
     }
-    iosX64()
     iosArm64()
     iosSimulatorArm64()
 
-    macosX64()
     macosArm64()
 
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
@@ -59,24 +60,18 @@ kotlin {
                 // Coroutines
                 implementation(libs.kotlinx.coroutines.core)
 
-                // Ktor for WebSocket connections to cloud providers
+                // Ktor HTTP client for OpenAI Whisper API calls
                 implementation(libs.ktor.client.core)
-                implementation("io.ktor:ktor-client-websockets:${libs.versions.ktor3.get()}")
-                implementation("io.ktor:ktor-client-content-negotiation:${libs.versions.ktor3.get()}")
-                implementation("io.ktor:ktor-serialization-kotlinx-json:${libs.versions.ktor3.get()}")
 
                 // Serialization for API messages
                 implementation(libs.kotlinx.serialization.json)
-
-                // Logging
-                implementation(libs.kotlin.logging)
             }
         }
         commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)
-                implementation("io.ktor:ktor-client-mock:${libs.versions.ktor3.get()}")
+                implementation(libs.ktor.client.mock)
             }
         }
         jvmMain {
@@ -88,8 +83,6 @@ kotlin {
             dependencies {
                 // JUnit 4 runner + Assume for the live OpenAI integration test.
                 implementation(libs.kotlin.testJunit)
-                // SLF4J binding so the engine's KotlinLogging output appears in test logs.
-                implementation(libs.slf4j.simple)
             }
         }
         androidMain {
@@ -100,13 +93,13 @@ kotlin {
         }
         appleMain {
             dependencies {
-                implementation("io.ktor:ktor-client-darwin:${libs.versions.ktor3.get()}")
+                implementation(libs.ktor.client.darwin)
             }
         }
         @Suppress("unused")
         val webMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-js:${libs.versions.ktor3.get()}")
+                implementation(libs.ktor.client.js)
             }
         }
     }
@@ -117,14 +110,3 @@ tasks.named<Test>("jvmTest") {
     maxHeapSize = "4g"
 }
 
-android {
-    namespace = "space.kodio.transcription"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-}

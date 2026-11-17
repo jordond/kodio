@@ -5,7 +5,10 @@ import web.events.Event
 import web.events.EventHandler
 import web.mediadevices.getUserMedia
 import web.navigator.navigator
+import space.kodio.core.util.namedLogger
 import web.permissions.*
+
+private val logger = namedLogger("WebPermissions")
 
 open class WebAudioPermissionManager : AudioPermissionManager() {
 
@@ -17,7 +20,8 @@ open class WebAudioPermissionManager : AudioPermissionManager() {
             val stream = navigator.mediaDevices.getUserMedia(constraints)
             stream.getTracks().toList().forEach { it.stop() }
             setState(State.Granted)
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            logger.warn(e) { "Microphone permission request failed" }
             setState(State.Denied)
         }
         registerOnChangeListener()
@@ -30,7 +34,7 @@ open class WebAudioPermissionManager : AudioPermissionManager() {
                 val currentState = a.currentTarget as PermissionStatus
                 setState(toState(currentState))
             }.onFailure {
-                it.printStackTrace()
+                logger.error(it) { "Permission change handling failed" }
                 setState(State.Unknown)
             }
         }

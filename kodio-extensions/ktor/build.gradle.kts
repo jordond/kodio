@@ -6,31 +6,32 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     id("kodio-publish-convention")
+    id("kodio-dokka-convention")
 }
 
 group = "dev.jordond.kodio.extensions"
 
 kodioPublishing {
     artifactId = "ktor"
-    description = "Ktor client/server extensions for streaming Kodio AudioFlow over WebSocket and SSE"
+    description = "Ktor client/server extensions for streaming Kodio AudioFlow over WebSocket"
 }
 
 kotlin {
     jvm()
-    androidTarget {
-        publishLibraryVariants("release")
+    androidLibrary {
+        namespace = "space.kodio.extensions.ktor"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
     }
-    iosX64()
     iosArm64()
     iosSimulatorArm64()
 
-    macosX64()
     macosArm64()
 
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
@@ -53,7 +54,6 @@ kotlin {
                 api(libs.ktor.client.websockets)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.io)
-                implementation(libs.kotlin.logging)
             }
         }
         commonTest {
@@ -72,7 +72,6 @@ kotlin {
                 implementation(libs.ktor.server.core)
                 implementation(libs.ktor.server.cio)
                 implementation(libs.ktor.server.websockets)
-                implementation(libs.slf4j.simple)
             }
         }
         androidMain {
@@ -95,18 +94,6 @@ kotlin {
     }
 }
 
-android {
-    namespace = "space.kodio.extensions.ktor"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-}
-
 // Linking the Kotlin/Native test binaries for the Ktor extension on Apple
 // targets currently trips an internal Kotlin/Native compiler assertion
 // ("Lowering ReturnsInsertion: phases [Autobox] are required, but not
@@ -117,13 +104,9 @@ android {
 // with this combination.
 val nativeTestTaskNames = setOf(
     "linkDebugTestMacosArm64",
-    "linkDebugTestMacosX64",
     "linkDebugTestIosArm64",
-    "linkDebugTestIosX64",
     "linkDebugTestIosSimulatorArm64",
     "macosArm64Test",
-    "macosX64Test",
     "iosSimulatorArm64Test",
-    "iosX64Test",
 )
 tasks.matching { it.name in nativeTestTaskNames }.configureEach { enabled = false }

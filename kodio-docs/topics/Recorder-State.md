@@ -7,11 +7,11 @@
 <p><b>Compose state holder</b> for recording with automatic permission handling, live waveform data, and reactive UI updates.</p>
 </tldr>
 
-`RecorderState` is a Compose state holder that makes building recording UIs simple. It handles recording lifecycle, permission requests, error states, and provides live amplitude data for waveform visualizations.
+`RecorderState` is a Compose state holder for recording UIs. It handles recording lifecycle, permission requests, error states, and provides live amplitude data for waveform visualizations.
 
 ## Basic usage {id="basic"}
 
-Create a recording UI in just a few lines:
+Create a recording UI in a few lines:
 
 ```kotlin
 @Composable
@@ -19,7 +19,7 @@ fun VoiceRecorder() {
     val recorderState = rememberRecorderState()
 
     Button(onClick = { recorderState.toggle() }) {
-        Text(if (recorderState.isRecording) "⏹ Stop" else "🎙 Record")
+        Text(if (recorderState.isRecording) "Stop" else "Record")
     }
 }
 ```
@@ -42,7 +42,7 @@ val recorderState = rememberRecorderState(
 
 ## Waveform visualization {id="waveform"}
 
-`RecorderState` provides `liveAmplitudes`—a list of normalized amplitude values (0.0 to 1.0) updated in real-time during recording:
+`RecorderState` provides `liveAmplitudes`, a list of normalized amplitude values (0.0 to 1.0) updated in real-time during recording:
 
 ```kotlin
 if (recorderState.isRecording) {
@@ -53,7 +53,7 @@ if (recorderState.isRecording) {
 }
 ```
 
-> See [AudioWaveform](Audio-Waveform.md) for customization options like colors, bar width, and gradients.
+> See [AudioWaveform](Audio-Waveform.md) for customization options like colors, styles, and gradients.
 >
 {style="tip"}
 
@@ -69,7 +69,7 @@ fun RecorderWithPermission() {
     if (recorderState.needsPermission) {
         // Show permission request UI
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("🎤 Microphone access required")
+            Text("Microphone access required")
             Button(onClick = { recorderState.requestPermission() }) {
                 Text("Grant Access")
             }
@@ -106,7 +106,7 @@ recorderState.error?.let { error ->
 
 ## Complete example {id="complete"}
 
-Here's a full recording UI with permission handling, waveform, and error display:
+Full recording UI with permission handling, waveform, and error display:
 
 ```kotlin
 @Composable
@@ -124,7 +124,7 @@ fun CompleteRecorder() {
     ) {
         // Permission check
         if (recorderState.needsPermission) {
-            Text("🎤 Microphone access needed")
+            Text("Microphone access needed")
             Spacer(Modifier.height(8.dp))
             Button(onClick = { recorderState.requestPermission() }) {
                 Text("Grant Access")
@@ -137,7 +137,7 @@ fun CompleteRecorder() {
             AudioWaveform(
                 amplitudes = recorderState.liveAmplitudes,
                 modifier = Modifier.fillMaxWidth().height(80.dp),
-                barColor = MaterialTheme.colorScheme.primary
+                colors = WaveformColors.solidColor(MaterialTheme.colorScheme.primary)
             )
             Spacer(Modifier.height(16.dp))
         }
@@ -152,7 +152,7 @@ fun CompleteRecorder() {
                     MaterialTheme.colorScheme.primary
             )
         ) {
-            Text(if (recorderState.isRecording) "⏹ Stop Recording" else "🎙 Start Recording")
+            Text(if (recorderState.isRecording) "Stop Recording" else "Start Recording")
         }
 
         // Error dialog
