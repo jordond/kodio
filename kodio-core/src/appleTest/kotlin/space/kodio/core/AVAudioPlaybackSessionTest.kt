@@ -292,6 +292,30 @@ internal class AVAudioPlaybackSessionTest {
     }
 
     @Test
+    fun `a resume whose node does not start ends the play in an error and the next sound plays`() = withAudioOutput {
+        val session = TestSession()
+        val firstScheduled = CompletableDeferred<Unit>()
+        session.load(gatedSilence(firstScheduled, CompletableDeferred()))
+        session.play()
+        firstScheduled.await()
+        session.pause()
+
+        session.detachNodeBeforeNodeStart = true
+        session.resume()
+
+        val failed = assertIs<State.Error>(session.state.value)
+        assertIs<AVAudioRaisedException>(failed.error)
+        // The playback job ends on the same failure and does not overwrite it.
+        assertIs<State.Error>(session.awaitEnd())
+
+        assertNull(KodioEngineAttachNode(session.engine, session.player))
+        session.load(silence(chunks = 2))
+        session.play()
+        assertEquals(State.Finished, session.awaitEnd())
+        session.release()
+    }
+
+    @Test
     fun `stop during a sound leaves the session ready for the next`() = withAudioOutput {
         val session = TestSession()
         val firstScheduled = CompletableDeferred<Unit>()

@@ -149,14 +149,15 @@ abstract class AVAudioPlaybackSession(
     internal fun recoverEngine(cause: String) {
         // Off the notification's thread, which AVFAudio posts from inside the engine.
         scope.launch {
-            val failure = engineLock.withLock {
-                if (playbackInFlight == null || paused || !scheduled) return@withLock null
+            engineLock.withLock {
+                // The play whose engine was lost: a failure here fails it, not one started since.
+                val inFlight = playbackInFlight
+                if (inFlight == null || paused || !scheduled) return@withLock
                 log.info { "Restarting the engine under the playing sound: $cause" }
-                runCatching { startNode(engineWasStopped = true) }.exceptionOrNull()
-            }
-            if (failure != null) {
-                log.error(failure) { "The engine did not come back: ${failure.message}" }
-                failPlaybackInFlight(failure)
+                runCatching { startNode(engineWasStopped = true) }.onFailure { failure ->
+                    log.error(failure) { "The engine did not come back: ${failure.message}" }
+                    inFlight.completeExceptionally(failure)
+                }
             }
         }
     }
@@ -241,10 +242,6 @@ abstract class AVAudioPlaybackSession(
     private fun stopEngineAfterFailure() = engineLock.withLock {
         attempt("stop the player node") { KodioPlayerNodeStop(player) }
         attempt("stop the engine") { KodioEngineStop(engine) }
-    }
-
-    private fun failPlaybackInFlight(cause: Throwable) {
-        engineLock.withLock { playbackInFlight }?.completeExceptionally(cause)
     }
 
     /** Runs a shim call whose failure must not stop what follows it. */
@@ -362,7 +359,8 @@ abstract class AVAudioPlaybackSession(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
-            if (engineLock.withLock { nodeGeneration == generation }) stopEngineAfterFailure()
+            // Checked and stopped in one step: a stop or the next play takes the node in between.
+            engineLock.withLock { if (nodeGeneration == generation) stopEngineAfterFailure() }
             throw failure
         } finally {
             engineLock.withLock {
@@ -483,17 +481,19 @@ abstract class AVAudioPlaybackSession(
             encoded.play()
             return
         }
-        try {
-            engineLock.withLock {
-                paused = false
-                // With nothing scheduled yet the next scheduled buffer plays the node; with no
-                // play in flight there is nothing to resume.
-                if (playbackInFlight == null || !scheduled) return
+        engineLock.withLock {
+            paused = false
+            // With nothing scheduled yet the next scheduled buffer plays the node; with no
+            // play in flight there is nothing to resume.
+            val inFlight = playbackInFlight
+            if (inFlight == null || !scheduled) return
+            try {
                 startNode()
+            } catch (failure: Exception) {
+                // Failed under the lock, so the play that failed is the one that ends.
+                inFlight.completeExceptionally(failure)
+                throw failure
             }
-        } catch (failure: Exception) {
-            failPlaybackInFlight(failure)
-            throw failure
         }
     }
 
