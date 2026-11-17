@@ -7,8 +7,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
@@ -33,7 +33,9 @@ class RecordingStartFailureTest {
             withTimeout(10.seconds) { session.state.first { it is AudioRecordingSession.State.Error } }
         }
         assertIs<AudioRecordingSession.State.Error>(state)
-        assertSame(failure, state.error)
+        // Not assertSame: on the JVM, coroutines' stack-trace recovery may hand on a copy.
+        val error = assertIs<IllegalStateException>(state.error)
+        assertEquals(failure.message, error.message)
         assertTrue(cleanedUp)
     }
 }
