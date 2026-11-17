@@ -7,12 +7,12 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/publish-maven-central.sh [version]
+  scripts/publish-maven-central.sh <version>
 
 Loads Maven Central and signing credentials from .env, then runs:
-  ./gradlew publishToMavenCentral --no-configuration-cache -Pkodio.version=<version>
+  ./gradlew publishAllPublicationsToMavenCentral --no-configuration-cache -Pkodio.version=<version>
 
-If version is omitted, the script uses kodio.version from gradle.properties.
+The version is required, for example 0.2.0-jordond.1.
 
 Required .env keys:
   MAVEN_CENTRAL_USERNAME
@@ -64,7 +64,7 @@ fi
 
 version="${1:-}"
 if [[ -z "$version" ]]; then
-  echo "Could not determine kodio.version. Pass a version explicitly." >&2
+  echo "Missing version. Usage: scripts/publish-maven-central.sh <version>" >&2
   exit 1
 fi
 

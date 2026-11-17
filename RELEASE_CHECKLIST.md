@@ -2,6 +2,11 @@
 
 Single source of truth for publishing a new Kodio release. Follow these steps in order.
 
+This fork publishes under `dev.jordond.kodio` (core) and `dev.jordond.kodio.extensions`
+(extensions), with versions that carry a fork suffix: `X.Y.Z-jordond.N`, tagged
+`vX.Y.Z-jordond.N`. Read `X.Y.Z` below as the full suffixed version. To publish from a
+machine instead of CI, run `scripts/publish-maven-central.sh X.Y.Z-jordond.N`.
+
 ## Overview
 
 Releases are tag-driven. Pushing a `v*` tag to `master` triggers `.github/workflows/publish.yml`, which:
@@ -67,6 +72,7 @@ git push origin vX.Y.Z
 **Tag format:**
 - Stable releases: `v1.0.0`, `v0.2.0`
 - Pre-releases: `v1.0.0-alpha`, `v1.0.0-beta.1`, `v1.0.0-rc.1` (auto-marked as prerelease on GitHub)
+- Fork releases: `v0.2.0-jordond.1` (the suffix marks the GitHub Release as a prerelease too)
 
 ## Monitor the Pipeline
 
@@ -88,11 +94,11 @@ gh run view <run-id> --log-failed   # if a job fails
 
 - [ ] GitHub Release exists: `gh release view vX.Y.Z`
 - [ ] All artifacts appear on Maven Central (may take 15 to 30 minutes):
-      - `space.kodio:core:X.Y.Z`
-      - `space.kodio.extensions:compose:X.Y.Z`
-      - `space.kodio.extensions:compose-material3:X.Y.Z`
-      - `space.kodio.extensions:transcription:X.Y.Z`
-      - `space.kodio.extensions:ktor:X.Y.Z`
+      - `dev.jordond.kodio:core:X.Y.Z`
+      - `dev.jordond.kodio.extensions:compose:X.Y.Z`
+      - `dev.jordond.kodio.extensions:compose-material3:X.Y.Z`
+      - `dev.jordond.kodio.extensions:transcription:X.Y.Z`
+      - `dev.jordond.kodio.extensions:ktor:X.Y.Z`
 
 ## Post-release (optional)
 
