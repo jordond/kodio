@@ -442,14 +442,20 @@ abstract class AVAudioPlaybackSession(
 
     override suspend fun playEncodedAudioBlocking(encodedAudio: EncodedAudio, startPosition: Duration) {
         val player = encodedPlayer ?: return
-        player.currentTime = startPosition.inWholeMilliseconds / 1000.0
-        if (!player.play()) {
-            throw AudioFileReadError.InvalidFile("Unable to start MP3 playback.")
+        engineLock.withLock {
+            player.currentTime = startPosition.inWholeMilliseconds / 1000.0
+            // A pause that came before this job ran leaves the sound to onResume.
+            if (!paused && !player.play()) {
+                throw AudioFileReadError.InvalidFile("Unable to start MP3 playback.")
+            }
         }
         while (player.isPlaying() || state.value is AudioPlaybackSession.State.Paused) {
             delay(50.milliseconds)
         }
     }
+
+    /** The loaded MP3 is playing, for tests. */
+    internal val isEncodedPlaying: Boolean get() = encodedPlayer?.isPlaying() == true
 
     override fun seekLoadedEncodedAudio(position: Duration) {
         encodedPlayer?.currentTime = position.inWholeMilliseconds / 1000.0
@@ -465,9 +471,9 @@ abstract class AVAudioPlaybackSession(
 
     override fun onPause() {
         log.info { "onPause()" }
-        encodedPlayer?.pause()
         engineLock.withLock {
             paused = true
+            encodedPlayer?.pause()
             if (player.isPlaying())
                 KodioPlayerNodePause(player).throwIfRaised()
         }
@@ -477,8 +483,10 @@ abstract class AVAudioPlaybackSession(
         log.info { "onResume()" }
         val encoded = encodedPlayer
         if (encoded != null) {
-            engineLock.withLock { paused = false }
-            encoded.play()
+            engineLock.withLock {
+                paused = false
+                encoded.play()
+            }
             return
         }
         engineLock.withLock {

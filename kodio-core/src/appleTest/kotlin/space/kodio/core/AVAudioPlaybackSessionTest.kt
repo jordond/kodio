@@ -2,9 +2,14 @@ package space.kodio.core
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import platform.AVFAudio.AVAudioEngine
 import platform.AVFAudio.AVAudioEngineConfigurationChangeNotification
@@ -12,6 +17,8 @@ import platform.Foundation.NSNotificationCenter
 import platform.AVFAudio.AVAudioMixerNode
 import platform.AVFAudio.AVAudioPlayerNode
 import space.kodio.core.AudioPlaybackSession.State
+import space.kodio.core.io.files.AudioFileFormat
+import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.objc.KodioEngineAttachNode
 import space.kodio.core.objc.KodioEngineConnect
 import space.kodio.core.objc.KodioEngineMainMixerNode
@@ -31,7 +38,9 @@ import kotlin.time.Duration.Companion.seconds
 @OptIn(ExperimentalForeignApi::class)
 internal class AVAudioPlaybackSessionTest {
 
-    private class TestSession : AVAudioPlaybackSession() {
+    private class TestSession(
+        dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    ) : AVAudioPlaybackSession(dispatcher) {
 
         /** How many of the next node starts find the engine stopped under them. */
         var engineStopsBeforeNodeStart = 0
@@ -330,6 +339,44 @@ internal class AVAudioPlaybackSessionTest {
         session.play()
         assertEquals(State.Finished, session.awaitEnd())
         session.release()
+    }
+
+    @Test
+    fun `a pause before the MP3 job runs keeps the MP3 paused until resume`() {
+        if (!canStartAnEngine()) {
+            println("No audio output on this host, skipped")
+            return
+        }
+        runTest {
+            val session = TestSession(StandardTestDispatcher(testScheduler))
+            session.load(EncodedAudio.fromBytes(silentMp3(frames = 100), AudioFileFormat.Mp3, "silence.mp3"))
+
+            session.play()
+            session.pause()
+            runCurrent()
+
+            assertEquals(State.Paused, session.state.value)
+            assertFalse(session.isEncodedPlaying)
+
+            session.resume()
+            assertEquals(State.Playing, session.state.value)
+            assertTrue(session.isEncodedPlaying)
+            session.release()
+        }
+    }
+
+    /** MPEG-1 Layer III frames at 128 kbit/s and 44.1 kHz whose side information and data are zero: silence. */
+    private fun silentMp3(frames: Int): ByteArray {
+        val frameSize = 144 * 128_000 / 44_100
+        val bytes = ByteArray(frameSize * frames)
+        for (frame in 0 until frames) {
+            val at = frame * frameSize
+            bytes[at] = 0xFF.toByte()
+            bytes[at + 1] = 0xFB.toByte()
+            bytes[at + 2] = 0x90.toByte()
+            bytes[at + 3] = 0x00
+        }
+        return bytes
     }
 
     /** Runs [test] when an engine can be started on this host, which needs an audio output. */
