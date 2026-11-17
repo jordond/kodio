@@ -7,7 +7,9 @@ import space.kodio.core.io.files.EncodedAudio
 import space.kodio.core.util.namedLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -17,18 +19,35 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlin.concurrent.Volatile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
 private val log = namedLogger("BasePlayback")
 
-abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
+/**
+ * @param dispatcher runs the playback job and the position tracking. Tests pass a test dispatcher.
+ */
+abstract class BaseAudioPlaybackSession(
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
+) : AudioPlaybackSession {
 
     private val _state = MutableStateFlow<State>(State.Idle)
     override val state: StateFlow<State> = _state.asStateFlow()
 
     private var playbackJob: Job? = null
+
+    /**
+     * Bumped by every call that ends or replaces a playback (stop, load, seek, play). A playback
+     * job, or a play that a resume launched, writes state only while the generation it started
+     * under is still current: a stop does not join the job it cancels, so the job may run on.
+     */
+    @Volatile
+    private var playGeneration = 0L
+
+    /** The play a resume after a paused seek launched, until it runs. */
+    private var resumePlayJob: Job? = null
     private var positionJob: Job? = null
     private var positionStartedAt: TimeSource.Monotonic.ValueTimeMark? = null
     private var positionAtStart: Duration = Duration.ZERO
@@ -53,7 +72,7 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
 
     private var loadedRecording: AudioRecording? = null
 
-    protected val scope = CoroutineScope(Dispatchers.Default) + SupervisorJob()
+    protected val scope = CoroutineScope(dispatcher) + SupervisorJob()
 
     abstract suspend fun preparePlayback(format: AudioFormat): AudioFormat
 
@@ -128,36 +147,52 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
             return
         }
         stopCurrentPlayback()
+        val generation = playGeneration
         log.info { "play(): audioFlow.format=${audioFlow.format}" }
         try {
             log.info { "Calling preparePlayback()" }
             val playbackFormat = preparePlayback(audioFlow.format)
             log.info { "preparePlayback() returned format: $playbackFormat" }
+            if (playGeneration != generation) {
+                log.info { "play(): stopped or replaced during preparation" }
+                return
+            }
             val playbackAudioFlow = audioFlow.convertAudio(playbackFormat)
             log.info { "Audio conversion applied, starting playback" }
-            val startPosition = _position.value
-            _state.value = State.Playing
-            startPositionTracking(startPosition)
-            playbackJob = scope.launch {
-                runCatching {
-                    playBlocking(playbackAudioFlow)
-                    stopPositionTracking(updatePosition = true)
-                    _position.value = _duration.value ?: _position.value
-                    playbackJob = null
-                    _state.value = State.Finished
-                    log.info { "Playback finished" }
-                }.onFailure {
-                    if (it is CancellationException) return@onFailure
-                    stopPositionTracking(updatePosition = true)
-                    playbackJob = null
-                    log.error(it) { "Playback failed: ${it.message}" }
-                    _state.value = State.Error(it)
-                }
-            }
+            launchPlayback(generation, "Playback") { playBlocking(playbackAudioFlow) }
         } catch (e: Exception) {
+            if (playGeneration != generation) return
             log.error(e) { "play() failed during preparation: ${e.message}" }
             _state.value = State.Error(e)
         }
+    }
+
+    /**
+     * Moves to [State.Playing] and runs [block] in the playback job. The job writes its end
+     * ([State.Finished] or [State.Error]) only while [generation] is current.
+     */
+    private fun launchPlayback(generation: Long, what: String, block: suspend () -> Unit) {
+        val startPosition = _position.value
+        _state.value = State.Playing
+        startPositionTracking(startPosition)
+        // Started only once assigned, so that its end cannot run before playbackJob is set.
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            val result = runCatching { block() }
+            val failure = result.exceptionOrNull()
+            if (failure is CancellationException || playGeneration != generation) return@launch
+            stopPositionTracking(updatePosition = true)
+            playbackJob = null
+            if (failure == null) {
+                _position.value = _duration.value ?: _position.value
+                _state.value = State.Finished
+                log.info { "$what finished" }
+            } else {
+                log.error(failure) { "$what failed: ${failure.message}" }
+                _state.value = State.Error(failure)
+            }
+        }
+        playbackJob = job
+        job.start()
     }
 
     final override suspend fun load(encodedAudio: EncodedAudio) {
@@ -253,6 +288,15 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
 
     final override fun pause() {
         log.info { "pause()" }
+        // A resume after a paused seek launched a play that has not run yet: drop it.
+        val pendingPlay = resumePlayJob
+        if (_state.value is State.Ready && pendingPlay != null && pendingPlay.isActive) {
+            playGeneration++
+            pendingPlay.cancel()
+            resumePlayJob = null
+            _state.value = State.Paused
+            return
+        }
         if (_state.value !is State.Playing) return
         stopPositionTracking(updatePosition = true)
         runAndUpdateState(State.Paused, ::onPause)
@@ -263,8 +307,12 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
         if (_state.value !is State.Paused) return
         // A seek while paused stops the backend, so there is nothing left to resume: play again.
         if (playbackJob == null && (loadedRecording != null || _encodedAudio.value != null)) {
+            val generation = playGeneration
             _state.value = State.Ready
-            scope.launch { play() }
+            // A stop or a pause that lands before this runs wins: the play is not made.
+            resumePlayJob = scope.launch {
+                if (playGeneration == generation && _state.value is State.Ready) play()
+            }
             return
         }
         runAndUpdateState(State.Playing, ::onResume)
@@ -276,6 +324,9 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
         stopPositionTracking(updatePosition = false)
         _position.value = Duration.ZERO
         val shouldStopBackend = playbackJob != null || _state.value is State.Playing || _state.value is State.Paused
+        playGeneration++
+        resumePlayJob?.cancel()
+        resumePlayJob = null
         runAndUpdateState(State.Idle) {
             if (shouldStopBackend) onStop()
             playbackJob?.cancel()
@@ -320,23 +371,8 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
         }
         stopCurrentPlayback()
         val startPosition = _position.value
-        _state.value = State.Playing
-        startPositionTracking(startPosition)
-        playbackJob = scope.launch {
-            runCatching {
-                playEncodedAudioBlocking(encodedAudio, startPosition)
-                stopPositionTracking(updatePosition = true)
-                _position.value = _duration.value ?: _position.value
-                playbackJob = null
-                _state.value = State.Finished
-                log.info { "Encoded playback finished" }
-            }.onFailure {
-                if (it is CancellationException) return@onFailure
-                stopPositionTracking(updatePosition = true)
-                playbackJob = null
-                log.error(it) { "Encoded playback failed: ${it.message}" }
-                _state.value = State.Error(it)
-            }
+        launchPlayback(playGeneration, "Encoded playback") {
+            playEncodedAudioBlocking(encodedAudio, startPosition)
         }
     }
 
@@ -347,6 +383,8 @@ abstract class BaseAudioPlaybackSession : AudioPlaybackSession {
     }
 
     private suspend fun stopCurrentPlayback() {
+        // Not resumePlayJob: the play it runs comes through here.
+        playGeneration++
         stopPositionTracking(updatePosition = false)
         val job = playbackJob
         if (job != null) {

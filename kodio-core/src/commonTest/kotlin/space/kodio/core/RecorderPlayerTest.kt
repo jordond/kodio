@@ -1,12 +1,18 @@
 package space.kodio.core
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import space.kodio.core.io.files.AudioFileFormat
 import space.kodio.core.io.files.EncodedAudio
 import kotlin.test.Test
@@ -472,7 +478,7 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base playback speed updates speed flow and backend`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
 
         session.setPlaybackSpeed(2.0f)
 
@@ -482,7 +488,7 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base playback speed rejects invalid values`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
 
         assertFailsWith<AudioError.InvalidPlaybackSpeed> {
             session.setPlaybackSpeed(0.0f)
@@ -494,7 +500,7 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base playback starts from seeked recording position`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
         val recording = AudioRecording.fromBytes(
             seekTestFormat,
             byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
@@ -511,7 +517,7 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base playback restarts loaded recording from finished state`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
         val recording = AudioRecording.fromBytes(
             seekTestFormat,
             byteArrayOf(0, 1, 2, 3, 4)
@@ -519,11 +525,11 @@ class RecorderPlayerTest {
 
         session.load(recording)
         session.play()
-        session.waitForPlayedChunkCount(1)
+        runCurrent()
         session.state.first { it is AudioPlaybackSession.State.Finished }
 
         session.play()
-        session.waitForPlayedChunkCount(2)
+        runCurrent()
         session.state.first { it is AudioPlaybackSession.State.Finished }
 
         assertEquals(2, session.seekPositions.size)
@@ -536,7 +542,7 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base seek clamps positions past recording duration`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
         val recording = AudioRecording.fromBytes(
             seekTestFormat,
             ByteArray(10)
@@ -551,7 +557,7 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base seek rejects streaming audio flows`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
 
         session.load(AudioFlow(seekTestFormat, flowOf(ByteArray(10))))
 
@@ -563,12 +569,12 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base encoded stop keeps source loaded for replay until replacement`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
         val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
 
         session.load(encoded)
         session.play()
-        session.waitForEncodedPlayCount(1)
+        runCurrent()
         session.stop()
 
         assertTrue(session.encodedAudio.value === encoded)
@@ -576,7 +582,7 @@ class RecorderPlayerTest {
         assertEquals(0, session.encodedReleaseCount)
 
         session.play()
-        session.waitForEncodedPlayCount(2)
+        runCurrent()
         session.stop()
 
         session.load(AudioFlow(seekTestFormat, flowOf(ByteArray(1))))
@@ -587,18 +593,18 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base encoded resume after a paused seek plays again instead of resuming the stopped backend`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
         val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
 
         session.load(encoded)
         session.play()
-        session.waitForEncodedPlayCount(1)
+        runCurrent()
         session.pause()
         session.seekTo(4.milliseconds)
         assertEquals(AudioPlaybackSession.State.Paused, session.state.value)
 
         session.resume()
-        session.waitForEncodedPlayCount(2)
+        runCurrent()
 
         assertEquals(4.milliseconds, session.encodedStartPositions[1])
         assertEquals(0, session.resumeCount)
@@ -607,8 +613,74 @@ class RecorderPlayerTest {
     }
 
     @Test
+    fun `Base stop before a resume's play runs keeps the session stopped`() = runTest {
+        val session = collectingSession()
+        val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
+
+        session.load(encoded)
+        session.play()
+        runCurrent()
+        session.pause()
+        session.seekTo(4.milliseconds)
+        session.resume()
+        session.stop()
+        runCurrent()
+
+        assertEquals(1, session.encodedStartPositions.size)
+        assertEquals(AudioPlaybackSession.State.Idle, session.state.value)
+    }
+
+    @Test
+    fun `Base pause before a resume's play runs keeps the session paused`() = runTest {
+        val session = collectingSession()
+        val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
+
+        session.load(encoded)
+        session.play()
+        runCurrent()
+        session.pause()
+        session.seekTo(4.milliseconds)
+        session.resume()
+        session.pause()
+        runCurrent()
+
+        assertEquals(1, session.encodedStartPositions.size)
+        assertEquals(AudioPlaybackSession.State.Paused, session.state.value)
+
+        session.resume()
+        runCurrent()
+
+        assertEquals(listOf(Duration.ZERO, 4.milliseconds), session.encodedStartPositions)
+        assertEquals(AudioPlaybackSession.State.Playing, session.state.value)
+        session.stop()
+    }
+
+    @Test
+    fun `Base stopped playback that runs on does not end the next play`() = runTest {
+        val session = collectingSession()
+        session.holdPlayback = true
+        session.load(AudioRecording.fromBytes(seekTestFormat, byteArrayOf(0, 1, 2, 3, 4)))
+
+        session.play()
+        runCurrent()
+        session.stop()
+        session.play()
+        runCurrent()
+        assertEquals(2, session.heldPlaybacks.size)
+
+        // The stopped playback ignores its cancellation and ends normally.
+        session.heldPlaybacks[0].complete(Unit)
+        runCurrent()
+        assertEquals(AudioPlaybackSession.State.Playing, session.state.value)
+
+        session.heldPlaybacks[1].complete(Unit)
+        runCurrent()
+        assertEquals(AudioPlaybackSession.State.Finished, session.state.value)
+    }
+
+    @Test
     fun `Base release frees loaded encoded backend`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
         val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
 
         session.load(encoded)
@@ -621,7 +693,7 @@ class RecorderPlayerTest {
 
     @Test
     fun `Base failed encoded load does not publish failed source`() = runTest {
-        val session = CollectingPlaybackSession()
+        val session = collectingSession()
         val recording = AudioRecording.fromBytes(seekTestFormat, byteArrayOf(1, 2, 3, 4))
         val encoded = EncodedAudio.fromBytes(byteArrayOf(1, 2, 3), AudioFileFormat.Mp3, "clip.mp3")
 
@@ -645,7 +717,11 @@ class RecorderPlayerTest {
         encoding = SampleEncoding.PcmInt(IntBitDepth.Eight)
     )
 
-    private class CollectingPlaybackSession : BaseAudioPlaybackSession() {
+    private fun TestScope.collectingSession() = CollectingPlaybackSession(StandardTestDispatcher(testScheduler))
+
+    private class CollectingPlaybackSession(
+        dispatcher: CoroutineDispatcher,
+    ) : BaseAudioPlaybackSession(dispatcher) {
         val playedChunks = mutableListOf<ByteArray>()
         val seekPositions = mutableListOf<Duration>()
         val encodedStartPositions = mutableListOf<Duration>()
@@ -654,10 +730,18 @@ class RecorderPlayerTest {
         var encodedReleaseCount = 0
         var failEncodedLoad = false
 
+        /** Each playback waits, deaf to its cancellation, until its entry in [heldPlaybacks] completes. */
+        var holdPlayback = false
+        val heldPlaybacks = mutableListOf<CompletableDeferred<Unit>>()
+
         override suspend fun preparePlayback(format: AudioFormat): AudioFormat = format
 
         override suspend fun playBlocking(audioFlow: AudioFlow) {
             seekPositions += position.value
+            if (holdPlayback) {
+                val held = CompletableDeferred<Unit>().also { heldPlaybacks += it }
+                withContext(NonCancellable) { held.await() }
+            }
             audioFlow.collect { playedChunks += it }
         }
 
@@ -689,22 +773,6 @@ class RecorderPlayerTest {
 
         override fun releaseLoadedEncodedAudio() {
             encodedReleaseCount++
-        }
-
-        suspend fun waitForEncodedPlayCount(count: Int) {
-            repeat(100) {
-                if (encodedStartPositions.size >= count) return
-                delay(10.milliseconds)
-            }
-            error("Timed out waiting for $count encoded playback starts")
-        }
-
-        suspend fun waitForPlayedChunkCount(count: Int) {
-            repeat(100) {
-                if (playedChunks.size >= count) return
-                delay(10.milliseconds)
-            }
-            error("Timed out waiting for $count played chunks")
         }
     }
 }
